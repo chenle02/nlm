@@ -1,0 +1,14 @@
+model: o4-mini
+approvalMode: full-auto
+fullAutoErrorMode: ask-user
+notify: true
+
+prompts:
+  MigrateLegacyVimScript:
+    description: "Migrate a Vimscript snippet to Lua config"
+    prompt: |
+      You are a Neovim expert. Migrate the following Vimscript to a Lua equivalent, compatible with lazy.nvim or vim-plug. Preserve the original behavior:
+      ```vim
+      {{input}}
+      ```
+
