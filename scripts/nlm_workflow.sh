@@ -9,6 +9,9 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 set -euo pipefail
 IFS=$'\n\t'
 
+# CSV file path
+CSV_FILE="${script_dir}/notebooks.csv"
+
 log() {
   local msg="$1"
   echo "[$(date '+%Y-%m-%d %H:%M:%S')] $msg" >&2
@@ -36,29 +39,72 @@ check_dependencies() {
   done
 }
 
-check_notebook_exists() {
-  local title="$1"
-  log "Checking if notebook '$title' exists..."
+# Initialize CSV file if it doesn't exist
+init_csv() {
+  if [[ ! -f "$CSV_FILE" ]]; then
+    log "Creating new CSV file at $CSV_FILE"
+    echo "id,title,file_count" > "$CSV_FILE"
+  fi
+}
+
+# Update CSV with current notebook list
+update_csv() {
+  log "Updating notebook CSV..."
+  # Create temporary file
+  local temp_file
+  temp_file=$(mktemp)
   
-  # Get notebook list and clean up the output
-  local notebooks
-  notebooks=$(nlm list 2>/dev/null | tail -n +3 | sed -E 's/[[:space:]]*$//' | sed -E 's/^[[:space:]]*//')
+  # Write header
+  echo "id,title,file_count" > "$temp_file"
   
-  # Debug output
-  log "Available notebooks:"
-  echo "$notebooks" | while read -r line; do
-    log "  '$line'"
+  # Get notebook list and process each line
+  nlm list 2>/dev/null | tail -n +3 | while read -r line; do
+    # Extract ID and title
+    local id title
+    id=$(echo "$line" | grep -Eo '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}' | head -1)
+    title=$(echo "$line" | sed -E 's/^[[:space:]]*//' | sed -E 's/[[:space:]]*$//' | sed -E "s/$id//" | sed -E 's/^[[:space:]]*//')
+    
+    if [[ -n "$id" && -n "$title" ]]; then
+      # Get file count for this notebook
+      local file_count
+      file_count=$(nlm sources "$id" 2>/dev/null | wc -l)
+      file_count=$((file_count - 1)) # Subtract header line
+      [[ $file_count -lt 0 ]] && file_count=0
+      
+      echo "$id,$title,$file_count" >> "$temp_file"
+    fi
   done
   
-  # Check for exact title match (ignoring leading/trailing spaces)
-  if echo "$notebooks" | grep -q "^$title$"; then
-    log "Found exact match for notebook '$title'"
-    return 0
-  fi
+  # Replace old CSV with new one
+  mv "$temp_file" "$CSV_FILE"
+  log "CSV file updated successfully"
+}
+
+# Get notebook ID from CSV by title
+get_notebook_id() {
+  local title="$1"
+  local id
+  id=$(awk -F, -v title="$title" '$2 == title {print $1}' "$CSV_FILE" | head -1)
+  echo "$id"
+}
+
+# Check if notebook exists in CSV
+check_notebook_exists() {
+  local title="$1"
+  log "Checking if notebook '$title' exists in CSV..."
   
-  # Check for title as a word boundary (to avoid partial matches)
-  if echo "$notebooks" | grep -q "\b$title\b"; then
-    log "Found notebook containing '$title' as a complete word"
+  # First update the CSV to ensure we have latest data
+  update_csv
+  
+  # Debug output
+  log "Available notebooks in CSV:"
+  tail -n +2 "$CSV_FILE" | while IFS=, read -r id name count; do
+    log "  '$name' (ID: $id, Files: $count)"
+  done
+  
+  # Check for exact title match
+  if awk -F, -v title="$title" '$2 == title {exit 1}' "$CSV_FILE"; then
+    log "Found notebook '$title' in CSV"
     return 0
   fi
   
@@ -80,6 +126,10 @@ create_notebook() {
     log "Failed to parse notebook ID from create output"
     exit 1
   fi
+  
+  # Update CSV with new notebook
+  update_csv
+  
   echo "$id"
 }
 
@@ -163,6 +213,7 @@ main() {
   [[ -f "$pdf" ]] || { echo "Error: '$pdf' not found." >&2; exit 1; }
 
   check_dependencies
+  init_csv
 
   local base
   base=$(basename "${pdf%.*}")
@@ -175,12 +226,16 @@ main() {
   # Create notebook and get its ID
   nb_id=$(create_notebook "$base")
   upload_pdf "$nb_id" "$pdf"
+  
+  # Update CSV after upload
+  update_csv
 
   # Generate and download audio overview (.wav)
   local outfile="${script_dir}/${base}.wav"
   generate_and_download_audio "$nb_id" "$outfile"
 
   log "Workflow complete. Audio saved to '$outfile'"
+  log "Notebook tracking CSV updated at $CSV_FILE"
 }
 
 main "$@"
