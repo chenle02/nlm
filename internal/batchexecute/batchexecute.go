@@ -238,8 +238,12 @@ func decodeResponse(raw string) ([]Response, error) {
 		case string:
 			resp.Data = json.RawMessage(v)
 		case nil:
-			// explicit null
-			resp.Data = json.RawMessage("null")
+			// explicit null or empty payload: capture full RPC envelope for error inspection
+			if full, err2 := json.Marshal(rpcData); err2 == nil {
+				resp.Data = json.RawMessage(full)
+			} else {
+				resp.Data = json.RawMessage("null")
+			}
 		default:
 			// marshal other types (e.g., numbers, objects)
 			if rawData, err := json.Marshal(v); err == nil {

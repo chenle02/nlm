@@ -612,12 +612,13 @@ func (c *Client) CreateAudioOverview(projectID string, instructions string) (*Au
 	}
 
    // Trigger audio generation: third argument expected as string rather than string array
+   // Invoke CreateAudioOverview RPC: args are [notebookID, 0, [instructions]]
    resp, err := c.rpc.Do(rpc.Call{
        ID: rpc.RPCCreateAudioOverview,
        Args: []interface{}{
            projectID,
            0,
-           instructions,
+           []interface{}{instructions},
        },
        NotebookID: projectID,
    })
@@ -639,30 +640,17 @@ func (c *Client) CreateAudioOverview(projectID string, instructions string) (*Au
        return result, nil
    }
 
-   // Check for server-side errors in the response envelope
-   // Primary case: error info in nested data[0][5]
-   var codeVal float64
-   var hasErr bool
-   if firstArr, ok := data[0].([]interface{}); ok && len(firstArr) > 5 {
-       if errInfo, ok2 := firstArr[5].([]interface{}); ok2 && len(errInfo) > 0 {
-           if code, ok3 := errInfo[0].(float64); ok3 {
-               codeVal = code
-               hasErr = codeVal != 0
+   // Check for server-side errors in RPC envelope: error details in data[5]
+   if len(data) > 5 {
+       if errInfo, ok := data[5].([]interface{}); ok && len(errInfo) > 0 {
+           if code, ok2 := errInfo[0].(float64); ok2 && code != 0 {
+               // Code 8 indicates daily audio limit reached
+               if int(code) == 8 {
+                   return nil, fmt.Errorf("You have reached your daily Audio Overview limit. Please try again later.")
+               }
+               return nil, fmt.Errorf("audio creation failed (code=%v), detail=%v", code, errInfo)
            }
        }
-   }
-   // Fallback case: flat data[5]
-   if !hasErr && len(data) > 5 {
-       if errInfo, ok2 := data[5].([]interface{}); ok2 && len(errInfo) > 0 {
-           if code, ok3 := errInfo[0].(float64); ok3 {
-               codeVal = code
-               hasErr = codeVal != 0
-           }
-       }
-   }
-   if hasErr {
-       // Include raw response data for debugging
-       return nil, fmt.Errorf("audio creation error (code=%v), response: %s", codeVal, string(resp))
    }
 
    // Parse the wrb.fr response format for audio data
