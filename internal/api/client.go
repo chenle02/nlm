@@ -2,14 +2,17 @@
 package api
 
 import (
-	"encoding/base64"
-	"encoding/json"
-	"fmt"
-	"io"
-	"net/http"
-	"net/url"
-	"os"
-	"strings"
+   "encoding/base64"
+   "encoding/json"
+   "fmt"
+   "io"
+   "net/http"
+   "net/url"
+   "os"
+   "os/exec"
+   "strings"
+   "path/filepath"
+   "time"
 
 	"github.com/davecgh/go-spew/spew"
 	pb "github.com/tmc/nlm/gen/notebooklm/v1alpha1"
@@ -279,17 +282,18 @@ func (c *Client) AddSourceFromBase64(projectID string, content, filename, conten
 	resp, err := c.rpc.Do(rpc.Call{
 		ID:         rpc.RPCAddSources,
 		NotebookID: projectID,
-		Args: []interface{}{
-			[]interface{}{
-				[]interface{}{
-					content,
-					filename,
-					contentType,
-					"base64",
-				},
-			},
-			projectID,
-		},
+       Args: []interface{}{
+           []interface{}{
+               []interface{}{
+                   content,
+                   filename,
+                   contentType,
+                   "base64",
+                   pb.SourceType_SOURCE_TYPE_LOCAL_FILE,
+               },
+           },
+           projectID,
+       },
 	})
 	if err != nil {
 		return "", fmt.Errorf("add binary source: %w", err)
@@ -304,14 +308,70 @@ func (c *Client) AddSourceFromBase64(projectID string, content, filename, conten
 	return sourceID, nil
 }
 
-func (c *Client) AddSourceFromFile(projectID string, filepath string) (string, error) {
-	f, err := os.Open(filepath)
-	if err != nil {
-		return "", fmt.Errorf("open file: %w", err)
-	}
-	defer f.Close()
+// AddSourceFromFile adds a source from a local file, with fallback polling for null responses.
+func (c *Client) AddSourceFromFile(projectID, filePath string) (string, error) {
+   f, err := os.Open(filePath)
+   if err != nil {
+       return "", fmt.Errorf("open file: %w", err)
+   }
+   defer f.Close()
 
-	return c.AddSourceFromReader(projectID, f, filepath)
+   if c.rpc.Config.Debug {
+       fmt.Fprintf(os.Stderr, "[AddSourceFromFile] DEBUG: Uploading file %q to notebook %q\n", filePath, projectID)
+   }
+   sourceID, err := c.AddSourceFromReader(projectID, f, filePath)
+   if err != nil {
+       // Handle null or missing response by polling for existence
+       if strings.Contains(err.Error(), "could not find source ID") || strings.Contains(err.Error(), "empty response") {
+           fmt.Fprintf(os.Stderr, "[AddSourceFromFile] WARNING: Got null response, polling for source...\n")
+           filename := filepath.Base(filePath)
+           base := filename
+           if ext := filepath.Ext(filename); ext != "" {
+               base = filename[:len(filename)-len(ext)]
+           }
+           for i := 0; i < 5; i++ {
+               time.Sleep(2 * time.Second)
+               sources, listErr := c.GetSources(projectID)
+               if listErr != nil {
+                   fmt.Fprintf(os.Stderr, "[AddSourceFromFile] Poll attempt %d: list error: %v\n", i+1, listErr)
+                   continue
+               }
+               // Debug: list all source titles
+               fmt.Fprintf(os.Stderr, "[AddSourceFromFile] Poll attempt %d: found %d sources:\n", i+1, len(sources))
+               for _, src := range sources {
+                   var sid string
+                   if src.SourceId != nil {
+                       sid = src.SourceId.SourceId
+                   }
+                   fmt.Fprintf(os.Stderr, "  - title=%q id=%s\n", src.Title, sid)
+               }
+               for _, src := range sources {
+                   title := strings.TrimSpace(src.Title)
+                   if title == filename || title == base {
+                       if src.SourceId != nil {
+                           fmt.Fprintf(os.Stderr, "[AddSourceFromFile] Matched source %q after polling\n", title)
+                           return src.SourceId.SourceId, nil
+                       }
+                   }
+               }
+               fmt.Fprintf(os.Stderr, "[AddSourceFromFile] Poll attempt %d: not found yet\n", i+1)
+           }
+           // Fallback for PDF: extract text via pdftotext and add as text source
+           if ext := strings.ToLower(filepath.Ext(filename)); ext == ".pdf" {
+               fmt.Fprintf(os.Stderr, "[AddSourceFromFile] Fallback: extracting text from PDF and uploading as text source\n")
+               cmd := exec.Command("pdftotext", filePath, "-")
+               txt, err2 := cmd.Output()
+               if err2 != nil {
+                   return "", fmt.Errorf("fallback pdftotext failed: %w", err2)
+               }
+               // Use filename (without path) as title
+               return c.AddSourceFromText(projectID, string(txt), filename)
+           }
+           return "", fmt.Errorf("upload verification failed: source %q not found after polling", filename)
+       }
+       return "", err
+   }
+   return sourceID, nil
 }
 
 func (c *Client) AddSourceFromURL(projectID string, url string) (string, error) {
@@ -884,4 +944,21 @@ func extractYouTubeVideoID(urlStr string) (string, error) {
 	}
 
 	return "", fmt.Errorf("unsupported YouTube URL format")
+}
+
+// GetSources returns the list of sources in the given notebook.
+func (c *Client) GetSources(projectID string) ([]*pb.Source, error) {
+   resp, err := c.rpc.Do(rpc.Call{
+       ID:         rpc.RPCGetProject,
+       Args:       []interface{}{projectID},
+       NotebookID: projectID,
+   })
+   if err != nil {
+       return nil, fmt.Errorf("get project: %w", err)
+   }
+   var project pb.Project
+   if err := beprotojson.Unmarshal(resp, &project); err != nil {
+       return nil, fmt.Errorf("parse project response: %w", err)
+   }
+   return project.GetSources(), nil
 }
