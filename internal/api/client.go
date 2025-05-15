@@ -626,28 +626,40 @@ func (c *Client) CreateAudioOverview(projectID string, instructions string) (*Au
 		return nil, fmt.Errorf("create audio overview: %w", err)
 	}
 
-	var data []interface{}
-	if err := json.Unmarshal(resp, &data); err != nil {
-		return nil, fmt.Errorf("parse response JSON: %w", err)
-	}
+   var data []interface{}
+   if err := json.Unmarshal(resp, &data); err != nil {
+       return nil, fmt.Errorf("parse response JSON: %w", err)
+   }
 
-	result := &AudioOverviewResult{
-		ProjectID: projectID,
-	}
+   result := &AudioOverviewResult{
+       ProjectID: projectID,
+   }
 
-	// Handle empty or nil response
-	if len(data) == 0 {
-		return result, nil
-	}
+   // Handle empty or nil response
+   if len(data) == 0 {
+       return result, nil
+   }
 
-	// Parse the wrb.fr response format
-	// Format: [null,null,[3,"<base64-audio>","<id>","<title>",null,true],null,[false]]
-	if len(data) > 2 {
-		audioData, ok := data[2].([]interface{})
-		if !ok || len(audioData) < 4 {
-			// Creation might be in progress, return result without error
-			return result, nil
-		}
+   // Check for server-side errors in the response envelope
+   if first, ok := data[0].([]interface{}); ok && len(first) > 5 {
+       if errInfo, ok2 := first[5].([]interface{}); ok2 && len(errInfo) > 0 {
+           if code, ok3 := errInfo[0].(float64); ok3 && code != 0 {
+               return nil, fmt.Errorf("audio creation error, code=%v", code)
+           }
+       }
+   }
+
+   // Parse the wrb.fr response format for audio data
+   // Format: [null,null,[3,"<base64-audio>","<id>","<title>",null,true],null,[false]]
+   if len(data) > 2 {
+       audioData, ok := data[2].([]interface{})
+       if !ok {
+           return nil, fmt.Errorf("invalid audio data format")
+       }
+       if len(audioData) < 4 {
+           // Creation might be in progress, return result without error
+           return result, nil
+       }
 
 		// Extract audio data (index 1)
 		if audioBase64, ok := audioData[1].(string); ok {
@@ -702,13 +714,18 @@ func (c *Client) GetAudioOverview(projectID string) (*AudioOverviewResult, error
 		return result, nil
 	}
 
-	// Parse the wrb.fr response format
-	// Format: [null,null,[3,"<base64-audio>","<id>","<title>",null,true],null,[false]]
-	if len(data) > 2 {
-		audioData, ok := data[2].([]interface{})
-		if !ok || len(audioData) < 4 {
-			return nil, fmt.Errorf("invalid audio data format")
-		}
+   // Parse the wrb.fr response format for audio data
+   // Format: [null,null,[3,"<base64-audio>","<id>","<title>",null,true],null,[false]]
+   if len(data) > 2 {
+       audioData, ok := data[2].([]interface{})
+       if !ok {
+           // Data not as expected; audio not ready
+           return result, nil
+       }
+       if len(audioData) < 4 {
+           // Audio not ready yet
+           return result, nil
+       }
 
 		// Extract audio data (index 1)
 		if audioBase64, ok := audioData[1].(string); ok {

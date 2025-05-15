@@ -96,18 +96,29 @@ func run() error {
 	cmd := flag.Arg(0)
 	args := flag.Args()[1:]
 
-	var opts []batchexecute.Option
-	for i := 0; i < 3; i++ {
+   // Prepare options for batchexecute, including debug if requested
+   var optsExec []batchexecute.Option
+   if debug {
+       optsExec = append(optsExec, batchexecute.WithDebug(true))
+   }
+   for i := 0; i < 3; i++ {
 		if i > 1 {
 			fmt.Fprintln(os.Stderr, "nlm: attempting again to obtain login information")
 			debug = true
 		}
 
-		if err := runCmd(api.New(authToken, cookies, opts...), cmd, args...); err == nil {
-			return nil
-		} else if !errors.Is(err, batchexecute.ErrUnauthorized) {
-			return err
-		}
+       // Attempt the command; enable debug after second failure as well
+       currentOpts := optsExec
+       if i > 1 && !debug {
+           // turn on debug on retry
+           currentOpts = append(currentOpts, batchexecute.WithDebug(true))
+       }
+       client := api.New(authToken, cookies, currentOpts...)
+       if err := runCmd(client, cmd, args...); err == nil {
+           return nil
+       } else if !errors.Is(err, batchexecute.ErrUnauthorized) {
+           return err
+       }
 
 		var err error
 		if authToken, cookies, err = handleAuth(nil, debug); err != nil {
