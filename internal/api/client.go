@@ -276,26 +276,34 @@ func (c *Client) AddSourceFromText(projectID string, content, title string) (str
 	return sourceID, nil
 }
 
-func (c *Client) AddSourceFromBase64(projectID string, content, filename, contentType string) (string, error) {
+func (c *Client) AddSourceFromBase64(projectID, content, filename, contentType string) (string, error) {
+	payload := []interface{}{
+		[]interface{}{
+			[]interface{}{
+				content,
+				filename,
+				contentType,
+				"base64",
+			},
+		},
+		projectID,
+	}
+	if c.rpc.Config.Debug {
+		fmt.Fprintf(os.Stderr, "[AddSourceFromBase64] DEBUG: payload (spew):\n")
+		spew.Dump(payload)
+	}
 	resp, err := c.rpc.Do(rpc.Call{
 		ID:         rpc.RPCAddSources,
 		NotebookID: projectID,
-		Args: []interface{}{
-			[]interface{}{
-				[]interface{}{
-					content,
-					filename,
-					contentType,
-					"base64",
-				},
-			},
-			projectID,
-		},
+		Args:       payload,
 	})
 	if err != nil {
 		return "", fmt.Errorf("add binary source: %w", err)
 	}
-
+	if c.rpc.Config.Debug {
+		fmt.Fprintf(os.Stderr, "[AddSourceFromBase64] DEBUG: raw response (spew):\n")
+		spew.Dump(resp)
+	}
 	sourceID, err := extractSourceID(resp)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, resp)
@@ -306,39 +314,43 @@ func (c *Client) AddSourceFromBase64(projectID string, content, filename, conten
 }
 
 // AddSourceFromFile adds a source from a file to the given notebook.
-func (c *Client) AddSourceFromFile(projectID string, filepath string) (string, error) {
-	// First try the normal upload
+func (c *Client) AddSourceFromFile(projectID, filepath string) (string, error) {
 	f, err := os.Open(filepath)
 	if err != nil {
 		return "", fmt.Errorf("open file: %w", err)
 	}
 	defer f.Close()
-
+	if c.rpc.Config.Debug {
+		fmt.Fprintf(os.Stderr, "[AddSourceFromFile] DEBUG: Uploading file %q (projectID=%q) via AddSourceFromReader\n", filepath, projectID)
+	}
 	sourceID, err := c.AddSourceFromReader(projectID, f, filepath)
 	if err != nil {
 		// If we get a "null" response, try to verify if the upload actually succeeded
-		if strings.Contains(err.Error(), "could not find source ID in response structure") {
-			fmt.Fprintf(os.Stderr, "Warning: Got null response, but upload may have succeeded. Verifying...\n")
-			// Wait a bit for the upload to complete
-			time.Sleep(2 * time.Second)
-			// Try to find the source by filename
-			sources, err := c.GetSources(projectID)
-			if err != nil {
-				return "", fmt.Errorf("verify upload: %w", err)
-			}
-			// Get base filename
+		if strings.Contains(err.Error(), "could not find source ID in response structure") ||
+			strings.Contains(err.Error(), "raw response is exactly \"null\"") {
+			fmt.Fprintf(os.Stderr, "[AddSourceFromFile] WARNING: Got null response, will poll for up to 10s to verify upload...\n")
 			filename := filepath
 			if idx := strings.LastIndex(filename, "/"); idx >= 0 {
 				filename = filename[idx+1:]
 			}
-			for _, source := range sources {
-				if source.GetTitle() == filename {
-					if source.GetSourceId() != nil {
-						return source.GetSourceId().GetSourceId(), nil
+			for i := 0; i < 5; i++ { // 5 attempts, 2s apart
+				time.Sleep(2 * time.Second)
+				sources, err := c.GetSources(projectID)
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "[AddSourceFromFile] Poll attempt %d: failed to list sources: %v\n", i+1, err)
+					continue
+				}
+				for _, source := range sources {
+					if source.GetTitle() == filename {
+						if source.GetSourceId() != nil {
+							fmt.Fprintf(os.Stderr, "[AddSourceFromFile] Found uploaded source after fallback polling.\n")
+							return source.GetSourceId().GetSourceId(), nil
+						}
 					}
 				}
+				fmt.Fprintf(os.Stderr, "[AddSourceFromFile] Poll attempt %d: source not found yet.\n", i+1)
 			}
-			return "", fmt.Errorf("upload verification failed: could not find source with title %q", filename)
+			return "", fmt.Errorf("upload verification failed after null response: could not find source with title %q after polling", filename)
 		}
 		return "", err
 	}
