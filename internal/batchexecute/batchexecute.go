@@ -192,12 +192,29 @@ var debug = true
 
 // decodeResponse decodes the batchexecute response
 func decodeResponse(raw string) ([]Response, error) {
-	raw = strings.TrimPrefix(raw, ")]}'")
+   // Remove JSON prefix
+   raw = strings.TrimPrefix(raw, ")]}'")
+   // Handle literal "\n" sequences (e.g., in raw string inputs) as newlines
+   raw = strings.ReplaceAll(raw, "\\n", "\n")
 	if raw == "" {
 		return nil, fmt.Errorf("empty response after trimming prefix")
 	}
+	// Remove any chunk length lines (pure numbers) and blank lines
+	var builder strings.Builder
+	for _, line := range strings.Split(raw, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+		if _, err := strconv.Atoi(trimmed); err == nil {
+			// skip chunk length line
+			continue
+		}
+		builder.WriteString(line)
+	}
+	filtered := builder.String()
 	var responses [][]interface{}
-	if err := json.NewDecoder(strings.NewReader(raw)).Decode(&responses); err != nil {
+	if err := json.NewDecoder(strings.NewReader(filtered)).Decode(&responses); err != nil {
 		return nil, fmt.Errorf("decode response: %w", err)
 	}
 
@@ -216,9 +233,17 @@ func decodeResponse(raw string) ([]Response, error) {
 			ID: id,
 		}
 
-		if rpcData[2] != nil {
-			if dataStr, ok := rpcData[2].(string); ok {
-				resp.Data = json.RawMessage(dataStr)
+		// Handle response data (may be JSON string or null/other type)
+		switch v := rpcData[2].(type) {
+		case string:
+			resp.Data = json.RawMessage(v)
+		case nil:
+			// explicit null
+			resp.Data = json.RawMessage("null")
+		default:
+			// marshal other types (e.g., numbers, objects)
+			if rawData, err := json.Marshal(v); err == nil {
+				resp.Data = json.RawMessage(rawData)
 			}
 		}
 
@@ -240,148 +265,49 @@ func decodeResponse(raw string) ([]Response, error) {
 
 // decodeChunkedResponse decodes the batchexecute response
 func decodeChunkedResponse(raw string) ([]Response, error) {
-	raw = strings.TrimSpace(strings.TrimPrefix(raw, ")]}'"))
-	if raw == "" {
-		return nil, fmt.Errorf("empty response after trimming prefix")
-	}
-
-	var responses []Response
-	reader := bufio.NewReader(strings.NewReader(raw))
-
-	for {
-		// Read the length line
-		lengthLine, err := reader.ReadString('\n')
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			return nil, fmt.Errorf("read length: %w", err)
-		}
-
-		// Skip empty lines
-		lengthStr := strings.TrimSpace(lengthLine)
-		if lengthStr == "" {
-			continue
-		}
-
-		totalLength, err := strconv.Atoi(lengthStr)
-		if err != nil {
-			if debug {
-				fmt.Printf("Invalid length string: %q\n", lengthStr)
-			}
-			return nil, fmt.Errorf("invalid chunk length: invalid syntax")
-		}
-
-		if debug {
-			fmt.Printf("Found chunk length: %d from string: %q\n",
-				totalLength, lengthStr)
-		}
-
-		// Read exactly totalLength bytes for the chunk
-		chunk := make([]byte, totalLength)
-		n, err := io.ReadFull(reader, chunk)
-		if err != nil {
-			if debug {
-				fmt.Printf("Failed to read chunk: got %d bytes, wanted %d: %v\n",
-					n, totalLength, err)
-			}
-			return nil, fmt.Errorf("read chunk: %w", err)
-		}
-
-		if debug {
-			fmt.Printf("Read chunk (%d bytes): %q\n",
-				len(chunk), string(chunk[:min(50, len(chunk))]))
-		}
-
-		// First try to parse as regular JSON
-		var rpcBatch [][]interface{}
-		if err := json.Unmarshal(chunk, &rpcBatch); err != nil {
-			// If that fails, try unescaping the JSON string first
-			unescaped, err := strconv.Unquote("\"" + string(chunk) + "\"")
-			if err != nil {
-				if debug {
-					fmt.Printf("Failed to unescape chunk: %v\n", err)
-				}
-				return nil, fmt.Errorf("failed to parse chunk: %w", err)
-			}
-			if err := json.Unmarshal([]byte(unescaped), &rpcBatch); err != nil {
-				if debug {
-					fmt.Printf("Failed to parse unescaped chunk: %v\n", err)
-				}
-				return nil, fmt.Errorf("failed to parse chunk: %w", err)
-			}
-		}
-
-		// Process each RPC response in the batch
-		for _, rpcData := range rpcBatch {
-			if len(rpcData) < 7 {
-				if debug {
-					fmt.Printf("Skipping short RPC data: %v\n", rpcData)
-				}
-				continue
-			}
-			rpcType, ok := rpcData[0].(string)
-			if !ok || rpcType != "wrb.fr" {
-				if debug {
-					fmt.Printf("Skipping non-wrb.fr RPC: %v\n", rpcData[0])
-				}
-				continue
-			}
-
-			id, _ := rpcData[1].(string)
-			resp := Response{
-				ID: id,
-			}
-
-			// Handle data - parse the nested JSON string
-			if rpcData[2] != nil {
-				if dataStr, ok := rpcData[2].(string); ok {
-					// Try to parse the data string
-					var data interface{}
-					if err := json.Unmarshal([]byte(dataStr), &data); err != nil {
-						// If direct parsing fails, try unescaping first
-						unescaped, err := strconv.Unquote("\"" + dataStr + "\"")
-						if err != nil {
-							if debug {
-								fmt.Printf("Failed to unescape data: %v\n", err)
-							}
-							continue
-						}
-						if err := json.Unmarshal([]byte(unescaped), &data); err != nil {
-							if debug {
-								fmt.Printf("Failed to parse unescaped data: %v\n", err)
-							}
-							continue
-						}
-					}
-					// Re-encode to get properly formatted JSON
-					rawData, err := json.Marshal(data)
-					if err != nil {
-						if debug {
-							fmt.Printf("Failed to re-encode response data: %v\n", err)
-						}
-						continue
-					}
-					resp.Data = rawData
-				}
-			}
-
-			// Handle index
-			if rpcData[6] == "generic" {
-				resp.Index = 0
-			} else if indexStr, ok := rpcData[6].(string); ok {
-				resp.Index, _ = strconv.Atoi(indexStr)
-			}
-
-			responses = append(responses, resp)
-		}
-	}
-
-	if len(responses) == 0 {
-		return nil, fmt.Errorf("no valid responses found")
-	}
-
-	return responses, nil
+   raw = strings.TrimSpace(strings.TrimPrefix(raw, ")]}'"))
+   if raw == "" {
+       return nil, fmt.Errorf("empty response after trimming prefix")
+   }
+   reader := bufio.NewReader(strings.NewReader(raw))
+   var builder strings.Builder
+   for {
+       lengthLine, err := reader.ReadString('\n')
+       if err == io.EOF {
+           break
+       }
+       if err != nil {
+           return nil, fmt.Errorf("read length: %w", err)
+       }
+       lengthStr := strings.TrimSpace(lengthLine)
+       if lengthStr == "" {
+           continue
+       }
+       totalLength, err := strconv.Atoi(lengthStr)
+       if err != nil {
+           if debug {
+               fmt.Printf("Invalid length string: %q\n", lengthStr)
+           }
+           return nil, fmt.Errorf("invalid chunk length: %w", err)
+       }
+       if totalLength == 0 {
+           break
+       }
+       chunk := make([]byte, totalLength)
+       n, err := io.ReadFull(reader, chunk)
+       if err != nil {
+           if debug {
+               fmt.Printf("Failed to read chunk: got %d bytes, wanted %d: %v\n", n, totalLength, err)
+           }
+           return nil, fmt.Errorf("read chunk: %w", err)
+       }
+       builder.Write(chunk)
+   }
+   full := builder.String()
+   if debug {
+       fmt.Printf("Full chunked JSON: %s\n", full)
+   }
+   return decodeResponse(full)
 }
 
 func handleChunk(chunk []byte, responses *[]Response) error {
