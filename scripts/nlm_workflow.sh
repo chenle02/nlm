@@ -9,9 +9,6 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 set -euo pipefail
 IFS=$'\n\t'
 
-# CSV file path
-CSV_FILE="${script_dir}/notebooks.csv"
-
 log() {
   local msg="$1"
   echo "[$(date '+%Y-%m-%d %H:%M:%S')] $msg" >&2
@@ -19,9 +16,8 @@ log() {
 
 usage() {
   cat <<EOF
-Usage: $0 <pdf-filename>
-Example: $0 chen_cranston_ea-17-dissipation.pdf
-Note: PDF files should be in the scripts directory
+Usage: $0 <path-to-pdf>
+Example: $0 chen_dalang-15-moments.pdf
 Automates:
   - notebook creation (if needed)
   - PDF upload
@@ -40,72 +36,29 @@ check_dependencies() {
   done
 }
 
-# Initialize CSV file if it doesn't exist
-init_csv() {
-  if [[ ! -f "$CSV_FILE" ]]; then
-    log "Creating new CSV file at $CSV_FILE"
-    echo "id,title,file_count" > "$CSV_FILE"
-  fi
-}
-
-# Update CSV with current notebook list
-update_csv() {
-  log "Updating notebook CSV..."
-  # Create temporary file
-  local temp_file
-  temp_file=$(mktemp)
-  
-  # Write header
-  echo "id,title,file_count" > "$temp_file"
-  
-  # Get notebook list and process each line
-  nlm list 2>/dev/null | tail -n +3 | while read -r line; do
-    # Extract ID and title
-    local id title
-    id=$(echo "$line" | grep -Eo '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}' | head -1)
-    title=$(echo "$line" | sed -E 's/^[[:space:]]*//' | sed -E 's/[[:space:]]*$//' | sed -E "s/$id//" | sed -E 's/^[[:space:]]*//')
-    
-    if [[ -n "$id" && -n "$title" ]]; then
-      # Get file count for this notebook
-      local file_count
-      file_count=$(nlm sources "$id" 2>/dev/null | wc -l)
-      file_count=$((file_count - 1)) # Subtract header line
-      [[ $file_count -lt 0 ]] && file_count=0
-      
-      echo "$id,$title,$file_count" >> "$temp_file"
-    fi
-  done
-  
-  # Replace old CSV with new one
-  mv "$temp_file" "$CSV_FILE"
-  log "CSV file updated successfully"
-}
-
-# Get notebook ID from CSV by title
-get_notebook_id() {
-  local title="$1"
-  local id
-  id=$(awk -F, -v title="$title" '$2 == title {print $1}' "$CSV_FILE" | head -1)
-  echo "$id"
-}
-
-# Check if notebook exists in CSV
 check_notebook_exists() {
   local title="$1"
-  log "Checking if notebook '$title' exists in CSV..."
+  log "Checking if notebook '$title' exists..."
   
-  # First update the CSV to ensure we have latest data
-  update_csv
+  # Get notebook list and clean up the output
+  local notebooks
+  notebooks=$(nlm list 2>/dev/null | tail -n +3 | sed -E 's/[[:space:]]*$//' | sed -E 's/^[[:space:]]*//')
   
   # Debug output
-  log "Available notebooks in CSV:"
-  tail -n +2 "$CSV_FILE" | while IFS=, read -r id name count; do
-    log "  '$name' (ID: $id, Files: $count)"
+  log "Available notebooks:"
+  echo "$notebooks" | while read -r line; do
+    log "  '$line'"
   done
   
-  # Check for exact title match
-  if awk -F, -v title="$title" '$2 == title {exit 1}' "$CSV_FILE"; then
-    log "Found notebook '$title' in CSV"
+  # Check for exact title match (ignoring leading/trailing spaces)
+  if echo "$notebooks" | grep -q "^$title$"; then
+    log "Found exact match for notebook '$title'"
+    return 0
+  fi
+  
+  # Check for title as a word boundary (to avoid partial matches)
+  if echo "$notebooks" | grep -q "\b$title\b"; then
+    log "Found notebook containing '$title' as a complete word"
     return 0
   fi
   
@@ -127,10 +80,6 @@ create_notebook() {
     log "Failed to parse notebook ID from create output"
     exit 1
   fi
-  
-  # Update CSV with new notebook
-  update_csv
-  
   echo "$id"
 }
 
@@ -144,11 +93,10 @@ upload_pdf() {
     exit 1
   fi
   
-  # Try to upload with timeout and retries
-  local max_attempts=5
+  # Try to upload with timeout
+  local max_attempts=3
   local attempt=1
   local success=false
-  local last_error=""
   
   while [[ $attempt -le $max_attempts ]]; do
     log "Upload attempt $attempt of $max_attempts..."
@@ -162,63 +110,27 @@ upload_pdf() {
     if [[ $exit_code -eq 0 ]] || \
        echo "$out" | grep -q "Adding " || \
        echo "$out" | grep -q "successfully added" || \
-       echo "$out" | grep -q "uploaded successfully" || \
-       echo "$out" | grep -q "source ID"; then
+       echo "$out" | grep -q "uploaded successfully"; then
       log "Upload succeeded"
       success=true
       break
     fi
     
-    # Check for specific error conditions
-    if echo "$out" | grep -q "could not find source ID in response structure"; then
-      # This is a known issue with JSON response handling
-      log "Warning: JSON response issue detected, but upload might have succeeded"
-      # Wait a bit and check if the file appears in sources
-      sleep 5
-      
-      # Try to verify the upload by checking sources multiple times
-      local verify_attempts=3
-      local verify_success=false
-      
-      while [[ $verify_attempts -gt 0 ]]; do
-        log "Verifying upload attempt $((4 - verify_attempts))..."
-        if nlm sources "$id" | grep -q "$(basename "$pdf")"; then
-          log "Upload verified through sources list"
-          verify_success=true
-          success=true
-          break
-        fi
-        log "Source not found in list, waiting before retry..."
-        sleep 5
-        verify_attempts=$((verify_attempts - 1))
-      done
-      
-      if [[ $verify_success == true ]]; then
-        break
-      fi
-    fi
-    
-    last_error="$out"
     log "Upload attempt $attempt failed: $out"
     attempt=$((attempt + 1))
-    [[ $attempt -le $max_attempts ]] && sleep 5
+    [[ $attempt -le $max_attempts ]] && sleep 2
   done
   
   if [[ $success == false ]]; then
     log "Failed to upload after $max_attempts attempts"
-    log "Last error: $last_error"
-    log "You can try to verify the upload manually with: nlm sources $id"
     exit 1
   fi
   
-  # Final verification
-  log "Performing final verification..."
+  # Verify the upload by checking sources
+  log "Verifying upload..."
   if ! nlm sources "$id" | grep -q "$(basename "$pdf")"; then
     log "Warning: PDF not found in notebook sources after upload"
-    log "The upload might still be processing. You can check the status later with: nlm sources $id"
-    log "If the file doesn't appear after a few minutes, you may need to try uploading again"
-  else
-    log "Upload verified successfully"
+    # Don't exit here as the upload might still be processing
   fi
 }
 
@@ -247,24 +159,13 @@ generate_and_download_audio() {
 
 main() {
   [[ $# -eq 1 ]] || usage
-  local pdf_name="$1"
-  local pdf="${script_dir}/${pdf_name}"
-  
-  # Check if file exists in scripts directory
-  if [[ ! -f "$pdf" ]]; then
-    log "Error: PDF file '$pdf_name' not found in scripts directory"
-    log "Available PDF files:"
-    ls -1 "${script_dir}"/*.pdf 2>/dev/null | while read -r f; do
-      log "  $(basename "$f")"
-    done
-    exit 1
-  fi
+  local pdf="$1"
+  [[ -f "$pdf" ]] || { echo "Error: '$pdf' not found." >&2; exit 1; }
 
   check_dependencies
-  init_csv
 
   local base
-  base=$(basename "${pdf_name%.*}")
+  base=$(basename "${pdf%.*}")
 
   if check_notebook_exists "$base"; then
     log "Notebook '$base' already exists. Exiting."
@@ -274,16 +175,12 @@ main() {
   # Create notebook and get its ID
   nb_id=$(create_notebook "$base")
   upload_pdf "$nb_id" "$pdf"
-  
-  # Update CSV after upload
-  update_csv
 
   # Generate and download audio overview (.wav)
   local outfile="${script_dir}/${base}.wav"
   generate_and_download_audio "$nb_id" "$outfile"
 
   log "Workflow complete. Audio saved to '$outfile'"
-  log "Notebook tracking CSV updated at $CSV_FILE"
 }
 
 main "$@"
