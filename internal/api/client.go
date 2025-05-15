@@ -2,22 +2,20 @@
 package api
 
 import (
-   "encoding/base64"
-   "encoding/json"
-   "fmt"
-   "io"
-   "net/http"
-   "net/url"
-   "os"
-   "strings"
-   "time"
-   "path/filepath"
+	"encoding/base64"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"net/url"
+	"os"
+	"strings"
 
-   "github.com/davecgh/go-spew/spew"
-   pb "github.com/tmc/nlm/gen/notebooklm/v1alpha1"
-   "github.com/tmc/nlm/internal/batchexecute"
-   "github.com/tmc/nlm/internal/beprotojson"
-   "github.com/tmc/nlm/internal/rpc"
+	"github.com/davecgh/go-spew/spew"
+	pb "github.com/tmc/nlm/gen/notebooklm/v1alpha1"
+	"github.com/tmc/nlm/internal/batchexecute"
+	"github.com/tmc/nlm/internal/beprotojson"
+	"github.com/tmc/nlm/internal/rpc"
 )
 
 type Notebook = pb.Project
@@ -277,36 +275,26 @@ func (c *Client) AddSourceFromText(projectID string, content, title string) (str
 	return sourceID, nil
 }
 
-func (c *Client) AddSourceFromBase64(projectID, content, filename, contentType string) (string, error) {
-   // Include file data encoded in Base64, filename, contentType, encoding, and local-file source type
-   payload := []interface{}{
-       []interface{}{
-           []interface{}{
-               content,                                 // base64-encoded file content
-               filename,                                // original filename
-               contentType,                             // MIME type
-               "base64",                               // encoding indicator
-               pb.SourceType_SOURCE_TYPE_LOCAL_FILE,    // local file source type
-           },
-       },
-       projectID,
-   }
-	if c.rpc.Config.Debug {
-		fmt.Fprintf(os.Stderr, "[AddSourceFromBase64] DEBUG: payload (spew):\n")
-		spew.Dump(payload)
-	}
+func (c *Client) AddSourceFromBase64(projectID string, content, filename, contentType string) (string, error) {
 	resp, err := c.rpc.Do(rpc.Call{
 		ID:         rpc.RPCAddSources,
 		NotebookID: projectID,
-		Args:       payload,
+		Args: []interface{}{
+			[]interface{}{
+				[]interface{}{
+					content,
+					filename,
+					contentType,
+					"base64",
+				},
+			},
+			projectID,
+		},
 	})
 	if err != nil {
 		return "", fmt.Errorf("add binary source: %w", err)
 	}
-	if c.rpc.Config.Debug {
-		fmt.Fprintf(os.Stderr, "[AddSourceFromBase64] DEBUG: raw response (spew):\n")
-		spew.Dump(resp)
-	}
+
 	sourceID, err := extractSourceID(resp)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, resp)
@@ -316,55 +304,14 @@ func (c *Client) AddSourceFromBase64(projectID, content, filename, contentType s
 	return sourceID, nil
 }
 
-// AddSourceFromFile adds a source from a file to the given notebook.
-func (c *Client) AddSourceFromFile(projectID, filePath string) (string, error) {
-   f, err := os.Open(filePath)
+func (c *Client) AddSourceFromFile(projectID string, filepath string) (string, error) {
+	f, err := os.Open(filepath)
 	if err != nil {
 		return "", fmt.Errorf("open file: %w", err)
 	}
 	defer f.Close()
-   if c.rpc.Config.Debug {
-       fmt.Fprintf(os.Stderr, "[AddSourceFromFile] DEBUG: Uploading file %q (projectID=%q) via AddSourceFromReader\n", filePath, projectID)
-   }
-   sourceID, err := c.AddSourceFromReader(projectID, f, filePath)
-	if err != nil {
-		// If we get a "null" response, try to verify if the upload actually succeeded
-       if strings.Contains(err.Error(), "could not find source ID in response structure") ||
-           strings.Contains(err.Error(), "raw response is exactly \"null\"") {
-           fmt.Fprintf(os.Stderr, "[AddSourceFromFile] WARNING: Got null response, will poll for up to 10s to verify upload...\n")
-           // derive filename base
-           filename := filePath
-           if idx := strings.LastIndex(filename, "/"); idx >= 0 {
-               filename = filename[idx+1:]
-           }
-           // also consider name without extension
-           base := filename
-           if ext := filepath.Ext(filename); ext != "" {
-               base = filename[:len(filename)-len(ext)]
-           }
-			for i := 0; i < 5; i++ { // 5 attempts, 2s apart
-				time.Sleep(2 * time.Second)
-				sources, err := c.GetSources(projectID)
-				if err != nil {
-					fmt.Fprintf(os.Stderr, "[AddSourceFromFile] Poll attempt %d: failed to list sources: %v\n", i+1, err)
-					continue
-				}
-               for _, source := range sources {
-                   title := source.GetTitle()
-                   if title == filename || title == base {
-                       if source.GetSourceId() != nil {
-                           fmt.Fprintf(os.Stderr, "[AddSourceFromFile] Found uploaded source after fallback polling.\n")
-                           return source.GetSourceId().GetSourceId(), nil
-                       }
-                   }
-               }
-				fmt.Fprintf(os.Stderr, "[AddSourceFromFile] Poll attempt %d: source not found yet.\n", i+1)
-			}
-			return "", fmt.Errorf("upload verification failed after null response: could not find source with title %q after polling", filename)
-		}
-		return "", err
-	}
-	return sourceID, nil
+
+	return c.AddSourceFromReader(projectID, f, filepath)
 }
 
 func (c *Client) AddSourceFromURL(projectID string, url string) (string, error) {
@@ -460,34 +407,15 @@ func extractSourceID(resp json.RawMessage) (string, error) {
 		return "", fmt.Errorf("empty response")
 	}
 
-	// Debug: print the raw response for inspection
-	fmt.Fprintf(os.Stderr, "[extractSourceID] DEBUG: raw response: %s\n", string(resp))
-
-	// If the raw response is exactly "null" (or unmarshals as nil), return a dummy ID and log a warning.
-	if string(resp) == "null" {
-		fmt.Fprintf(os.Stderr, "[extractSourceID] WARNING: raw response is exactly \"null\". Allowing upload to proceed (using dummy-id).\n")
-		return "dummy-id", nil
-	}
-
 	var data []interface{}
 	if err := json.Unmarshal(resp, &data); err != nil {
 		return "", fmt.Errorf("parse response JSON: %w", err)
 	}
 
-	// Debug: dump parsed data (using spew) for inspection
-	fmt.Fprintf(os.Stderr, "[extractSourceID] DEBUG: parsed data (spew):\n")
-	spew.Dump(data)
-
-	// If the parsed data is nil (or empty), return a dummy ID and log a warning.
-	if data == nil || len(data) == 0 {
-		fmt.Fprintf(os.Stderr, "[extractSourceID] WARNING: parsed data is nil or empty. Allowing upload to proceed (using dummy-id).\n")
-		return "dummy-id", nil
-	}
-
-	// Try different response formats (old formats)
-	// Format 1: [[[['id',...]]]]
-	// Format 2: [[['id',...]]]
-	// Format 3: [['id',...]]
+	// Try different response formats
+	// Format 1: [[[["id",...]]]]
+	// Format 2: [[["id",...]]]
+	// Format 3: [["id",...]]
 	for _, format := range []func([]interface{}) (string, bool){
 		// Format 1
 		func(d []interface{}) (string, bool) {
@@ -532,12 +460,6 @@ func extractSourceID(resp json.RawMessage) (string, error) {
 		if id, ok := format(data); ok {
 			return id, nil
 		}
-	}
-
-	// Fallback: if the response is not empty, allow success (with a dummy ID) and log a warning
-	if len(data) > 0 {
-		fmt.Fprintf(os.Stderr, "[extractSourceID] WARNING: Could not extract source ID (old formats), but response is non-empty. Allowing upload to proceed (using dummy-id).\n")
-		return "dummy-id", nil
 	}
 
 	return "", fmt.Errorf("could not find source ID in response structure: %v", data)
@@ -962,26 +884,4 @@ func extractYouTubeVideoID(urlStr string) (string, error) {
 	}
 
 	return "", fmt.Errorf("unsupported YouTube URL format")
-}
-
-// GetSources returns a list of sources in the given notebook.
-func (c *Client) GetSources(projectID string) ([]*pb.Source, error) {
-	resp, err := c.rpc.Do(rpc.Call{
-		ID:         rpc.RPCGetProject,
-		Args:       []interface{}{projectID},
-		NotebookID: projectID,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("get project: %w", err)
-	}
-
-	// Debug: print the raw response for inspection
-	fmt.Fprintf(os.Stderr, "[GetSources] DEBUG: raw response: %q\n", string(resp))
-	fmt.Fprintf(os.Stderr, "[GetSources] DEBUG: raw bytes: %v\n", []byte(string(resp)))
-
-	var project pb.Project
-	if err := beprotojson.Unmarshal(resp, &project); err != nil {
-		return nil, fmt.Errorf("parse project response: %w", err)
-	}
-	return project.GetSources(), nil
 }
