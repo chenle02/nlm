@@ -39,8 +39,8 @@ check_dependencies() {
 check_notebook_exists() {
   local title="$1"
   log "Checking if notebook '$title' exists..."
-  # Check if title appears in the notebook list
-  if nlm list 2>/dev/null | grep -Fq "$title"; then
+  # Check if the title appears in any notebook listing (skip header)
+  if nlm list 2>/dev/null | tail -n +3 | grep -Fq "$title"; then
     return 0
   fi
   return 1
@@ -68,8 +68,10 @@ upload_pdf() {
   log "Uploading '$pdf' to notebook id '$id'..."
   # Add PDF as source to notebook
   # Add PDF as source to notebook; capture output and detect 'Adding' prefix
+  # Add PDF as a source; success messages start with 'Adding '
+  # Run 'nlm add', but ignore exit code (content may return non-zero despite success)
   out=$(nlm add "$id" "$pdf" 2>&1) || true
-  if echo "$out" | grep -qE '^Adding '; then
+  if echo "$out" | grep -Fq 'Adding '; then
     log "Upload succeeded"
   else
     log "Upload failed: $out"
