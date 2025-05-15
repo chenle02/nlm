@@ -239,6 +239,10 @@ These are typically managed by the `auth` command, but can be manually configure
 
 Contributions are welcome! Please feel free to submit a Pull Request.
 
+## 🚀 Enhancements in This Fork
+
+- ✅ Fixed multi-chunk response decoding in `nlm list`
+
 ## License 📄
 
 MIT License - see [LICENSE](LICENSE) for details.
