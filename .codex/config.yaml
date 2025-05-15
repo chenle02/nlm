@@ -4,11 +4,29 @@ fullAutoErrorMode: ask-user
 notify: true
 
 prompts:
-  MigrateLegacyVimScript:
-    description: "Migrate a Vimscript snippet to Lua config"
+  GenerateScript:
+    description: "Generate a bash script to automate the NotebookLM workflow using nlm."
     prompt: |
-      You are a Neovim expert. Migrate the following Vimscript to a Lua equivalent, compatible with lazy.nvim or vim-plug. Preserve the original behavior:
-      ```vim
-      {{input}}
-      ```
+      You are an assistant that writes bash scripts to automate workflows using the `nlm` CLI tool.
+      
+      Given the following task, generate a complete, well-commented bash script:
 
+      **Workflow Requirements:**
+
+      1. Input is a PDF file (e.g., `chen_dalang-15-moments.pdf`).
+      2. Extract the base name (e.g., `chen_dalang-15-moments`) to use as the notebook title.
+      3. Check if a notebook with this name already exists using `nlm list`.
+      4. If it exists, print a message and exit.
+      5. If it doesn't exist:
+         - Create a new notebook with this name.
+         - Upload the given PDF to the newly created notebook.
+      6. Once the notebook is created and the PDF is successfully uploaded:
+         - Generate an audio podcast using `nlm audio` or equivalent.
+         - Monitor the podcast generation process in the background (loop or sleep-check if necessary).
+         - When the podcast is ready, download it and report completion.
+
+      Please ensure the script is modular, includes error checks, and logs progress clearly.
+
+      ```
+      {{input}}
+      

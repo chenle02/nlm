@@ -9,6 +9,7 @@ the terminal.
 
 This project aims to:
 
-1. Fix compatibility issues with the upstream nlm tool (e.g., JSON decoding, browser automation).
-2. Implement a user-friendly CLI for document ingestion, note generation, and audio synthesis.
+1. [X] Fix compatibility issues with the upstream nlm tool (e.g., JSON decoding, browser automation).
+2. [ ] Implement a user-friendly CLI for document ingestion, note generation, and audio synthesis.
+
 
