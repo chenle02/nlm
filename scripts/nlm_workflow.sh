@@ -39,7 +39,7 @@ check_dependencies() {
 check_notebook_exists() {
   local title="$1"
   log "Checking if notebook '$title' exists..."
-  # List notebooks and look for the title substring
+  # Check if title appears in the notebook list
   if nlm list 2>/dev/null | grep -Fq "$title"; then
     return 0
   fi
@@ -67,8 +67,12 @@ upload_pdf() {
   local id="$1" pdf="$2"
   log "Uploading '$pdf' to notebook id '$id'..."
   # Add PDF as source to notebook
-  if ! nlm add "$id" "$pdf"; then
-    log "Upload failed"
+  # Add PDF as source to notebook; capture output and detect 'Adding' prefix
+  out=$(nlm add "$id" "$pdf" 2>&1) || true
+  if echo "$out" | grep -qE '^Adding '; then
+    log "Upload succeeded"
+  else
+    log "Upload failed: $out"
     exit 1
   fi
 }
