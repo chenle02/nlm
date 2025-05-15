@@ -2,21 +2,22 @@
 package api
 
 import (
-	"encoding/base64"
-	"encoding/json"
-	"fmt"
-	"io"
-	"net/http"
-	"net/url"
-	"os"
-	"strings"
-	"time"
+   "encoding/base64"
+   "encoding/json"
+   "fmt"
+   "io"
+   "net/http"
+   "net/url"
+   "os"
+   "strings"
+   "time"
+   "path/filepath"
 
-	"github.com/davecgh/go-spew/spew"
-	pb "github.com/tmc/nlm/gen/notebooklm/v1alpha1"
-	"github.com/tmc/nlm/internal/batchexecute"
-	"github.com/tmc/nlm/internal/beprotojson"
-	"github.com/tmc/nlm/internal/rpc"
+   "github.com/davecgh/go-spew/spew"
+   pb "github.com/tmc/nlm/gen/notebooklm/v1alpha1"
+   "github.com/tmc/nlm/internal/batchexecute"
+   "github.com/tmc/nlm/internal/beprotojson"
+   "github.com/tmc/nlm/internal/rpc"
 )
 
 type Notebook = pb.Project
@@ -314,25 +315,31 @@ func (c *Client) AddSourceFromBase64(projectID, content, filename, contentType s
 }
 
 // AddSourceFromFile adds a source from a file to the given notebook.
-func (c *Client) AddSourceFromFile(projectID, filepath string) (string, error) {
-	f, err := os.Open(filepath)
+func (c *Client) AddSourceFromFile(projectID, filePath string) (string, error) {
+   f, err := os.Open(filePath)
 	if err != nil {
 		return "", fmt.Errorf("open file: %w", err)
 	}
 	defer f.Close()
-	if c.rpc.Config.Debug {
-		fmt.Fprintf(os.Stderr, "[AddSourceFromFile] DEBUG: Uploading file %q (projectID=%q) via AddSourceFromReader\n", filepath, projectID)
-	}
-	sourceID, err := c.AddSourceFromReader(projectID, f, filepath)
+   if c.rpc.Config.Debug {
+       fmt.Fprintf(os.Stderr, "[AddSourceFromFile] DEBUG: Uploading file %q (projectID=%q) via AddSourceFromReader\n", filePath, projectID)
+   }
+   sourceID, err := c.AddSourceFromReader(projectID, f, filePath)
 	if err != nil {
 		// If we get a "null" response, try to verify if the upload actually succeeded
-		if strings.Contains(err.Error(), "could not find source ID in response structure") ||
-			strings.Contains(err.Error(), "raw response is exactly \"null\"") {
-			fmt.Fprintf(os.Stderr, "[AddSourceFromFile] WARNING: Got null response, will poll for up to 10s to verify upload...\n")
-			filename := filepath
-			if idx := strings.LastIndex(filename, "/"); idx >= 0 {
-				filename = filename[idx+1:]
-			}
+       if strings.Contains(err.Error(), "could not find source ID in response structure") ||
+           strings.Contains(err.Error(), "raw response is exactly \"null\"") {
+           fmt.Fprintf(os.Stderr, "[AddSourceFromFile] WARNING: Got null response, will poll for up to 10s to verify upload...\n")
+           // derive filename base
+           filename := filePath
+           if idx := strings.LastIndex(filename, "/"); idx >= 0 {
+               filename = filename[idx+1:]
+           }
+           // also consider name without extension
+           base := filename
+           if ext := filepath.Ext(filename); ext != "" {
+               base = filename[:len(filename)-len(ext)]
+           }
 			for i := 0; i < 5; i++ { // 5 attempts, 2s apart
 				time.Sleep(2 * time.Second)
 				sources, err := c.GetSources(projectID)
@@ -340,14 +347,15 @@ func (c *Client) AddSourceFromFile(projectID, filepath string) (string, error) {
 					fmt.Fprintf(os.Stderr, "[AddSourceFromFile] Poll attempt %d: failed to list sources: %v\n", i+1, err)
 					continue
 				}
-				for _, source := range sources {
-					if source.GetTitle() == filename {
-						if source.GetSourceId() != nil {
-							fmt.Fprintf(os.Stderr, "[AddSourceFromFile] Found uploaded source after fallback polling.\n")
-							return source.GetSourceId().GetSourceId(), nil
-						}
-					}
-				}
+               for _, source := range sources {
+                   title := source.GetTitle()
+                   if title == filename || title == base {
+                       if source.GetSourceId() != nil {
+                           fmt.Fprintf(os.Stderr, "[AddSourceFromFile] Found uploaded source after fallback polling.\n")
+                           return source.GetSourceId().GetSourceId(), nil
+                       }
+                   }
+               }
 				fmt.Fprintf(os.Stderr, "[AddSourceFromFile] Poll attempt %d: source not found yet.\n", i+1)
 			}
 			return "", fmt.Errorf("upload verification failed after null response: could not find source with title %q after polling", filename)
@@ -453,10 +461,10 @@ func extractSourceID(resp json.RawMessage) (string, error) {
 	// Debug: print the raw response for inspection
 	fmt.Fprintf(os.Stderr, "[extractSourceID] DEBUG: raw response: %s\n", string(resp))
 
-	// If the raw response is exactly "null" (or unmarshals as nil), return a dummy ID and log a warning.
+	// If the raw response is exactly "null", report an error so callers can retry or verify upload
 	if string(resp) == "null" {
-		fmt.Fprintf(os.Stderr, "[extractSourceID] WARNING: raw response is exactly \"null\". Allowing upload to proceed (using dummy-id).\n")
-		return "dummy-id", nil
+		fmt.Fprintf(os.Stderr, "[extractSourceID] WARNING: raw response is exactly \"null\".\n")
+		return "", fmt.Errorf("raw response is exactly \"null\"")
 	}
 
 	var data []interface{}
@@ -468,10 +476,10 @@ func extractSourceID(resp json.RawMessage) (string, error) {
 	fmt.Fprintf(os.Stderr, "[extractSourceID] DEBUG: parsed data (spew):\n")
 	spew.Dump(data)
 
-	// If the parsed data is nil (or empty), return a dummy ID and log a warning.
+	// If the parsed data is nil or empty, report an error so callers can retry or verify upload
 	if data == nil || len(data) == 0 {
-		fmt.Fprintf(os.Stderr, "[extractSourceID] WARNING: parsed data is nil or empty. Allowing upload to proceed (using dummy-id).\n")
-		return "dummy-id", nil
+		fmt.Fprintf(os.Stderr, "[extractSourceID] WARNING: parsed data is nil or empty.\n")
+		return "", fmt.Errorf("parsed response data is nil or empty")
 	}
 
 	// Try different response formats (old formats)
