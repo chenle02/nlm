@@ -1,3 +1,16 @@
+> **🚨 Fork Notice**
+> 
+> This repository is a personal fork of [tmc/nlm](https://github.com/tmc/nlm), an experimental command-line interface for Google's [NotebookLM](https://notebooklm.google.com/).
+> 
+> The purpose of this fork is to:
+> - Fix JSON unmarshaling issues affecting `nlm list`
+> - Improve cross-platform compatibility and usability
+> - Extend functionality for podcast automation and terminal workflows
+> 
+> Original author: [@tmc](https://github.com/tmc)  
+> Fork maintained by: [@chenle02](https://github.com/chenle02)
+
+---
 # nlm - NotebookLM CLI Tool 📚
 
 `nlm` is a command-line interface for Google's NotebookLM, allowing you to manage notebooks, sources, and audio overviews from your terminal.
