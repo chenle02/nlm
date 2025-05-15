@@ -39,10 +39,30 @@ check_dependencies() {
 check_notebook_exists() {
   local title="$1"
   log "Checking if notebook '$title' exists..."
-  # Check if the title appears in any notebook listing (skip header)
-  if nlm list 2>/dev/null | tail -n +3 | grep -Fq "$title"; then
+  
+  # Get notebook list and clean up the output
+  local notebooks
+  notebooks=$(nlm list 2>/dev/null | tail -n +3 | sed -E 's/[[:space:]]*$//' | sed -E 's/^[[:space:]]*//')
+  
+  # Debug output
+  log "Available notebooks:"
+  echo "$notebooks" | while read -r line; do
+    log "  '$line'"
+  done
+  
+  # Check for exact title match (ignoring leading/trailing spaces)
+  if echo "$notebooks" | grep -q "^$title$"; then
+    log "Found exact match for notebook '$title'"
     return 0
   fi
+  
+  # Check for title as a word boundary (to avoid partial matches)
+  if echo "$notebooks" | grep -q "\b$title\b"; then
+    log "Found notebook containing '$title' as a complete word"
+    return 0
+  fi
+  
+  log "No matching notebook found for '$title'"
   return 1
 }
 
@@ -66,16 +86,51 @@ create_notebook() {
 upload_pdf() {
   local id="$1" pdf="$2"
   log "Uploading '$pdf' to notebook id '$id'..."
-  # Add PDF as source to notebook
-  # Add PDF as source to notebook; capture output and detect 'Adding' prefix
-  # Add PDF as a source; success messages start with 'Adding '
-  # Run 'nlm add', but ignore exit code (content may return non-zero despite success)
-  out=$(nlm add "$id" "$pdf" 2>&1) || true
-  if echo "$out" | grep -Fq 'Adding '; then
-    log "Upload succeeded"
-  else
-    log "Upload failed: $out"
+  
+  # First verify the notebook exists
+  if ! nlm sources "$id" &>/dev/null; then
+    log "Error: Notebook ID '$id' not found or inaccessible"
     exit 1
+  fi
+  
+  # Try to upload with timeout
+  local max_attempts=3
+  local attempt=1
+  local success=false
+  
+  while [[ $attempt -le $max_attempts ]]; do
+    log "Upload attempt $attempt of $max_attempts..."
+    
+    # Run nlm add and capture both stdout and stderr
+    local out
+    out=$(nlm add "$id" "$pdf" 2>&1)
+    local exit_code=$?
+    
+    # Check for various success indicators
+    if [[ $exit_code -eq 0 ]] || \
+       echo "$out" | grep -q "Adding " || \
+       echo "$out" | grep -q "successfully added" || \
+       echo "$out" | grep -q "uploaded successfully"; then
+      log "Upload succeeded"
+      success=true
+      break
+    fi
+    
+    log "Upload attempt $attempt failed: $out"
+    attempt=$((attempt + 1))
+    [[ $attempt -le $max_attempts ]] && sleep 2
+  done
+  
+  if [[ $success == false ]]; then
+    log "Failed to upload after $max_attempts attempts"
+    exit 1
+  fi
+  
+  # Verify the upload by checking sources
+  log "Verifying upload..."
+  if ! nlm sources "$id" | grep -q "$(basename "$pdf")"; then
+    log "Warning: PDF not found in notebook sources after upload"
+    # Don't exit here as the upload might still be processing
   fi
 }
 
