@@ -358,10 +358,19 @@ func handleChunk(chunk []byte, responses *[]Response) error {
 			ID: id,
 		}
 
-		// Handle data
-		if rpcData[2] != nil {
-			if dataStr, ok := rpcData[2].(string); ok {
-				resp.Data = json.RawMessage(dataStr)
+		// Handle data: normally rpcData[2] is JSON string payload
+		switch v := rpcData[2].(type) {
+		case string:
+			resp.Data = json.RawMessage(v)
+		case nil:
+			// No direct data; fall back to full rpcData envelope
+			if full, err := json.Marshal(rpcData); err == nil {
+				resp.Data = json.RawMessage(full)
+			}
+		default:
+			// Unexpected type (array or object), marshal entire rpcData
+			if full, err := json.Marshal(rpcData); err == nil {
+				resp.Data = json.RawMessage(full)
 			}
 		}
 

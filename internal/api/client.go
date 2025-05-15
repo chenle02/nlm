@@ -611,17 +611,16 @@ func (c *Client) CreateAudioOverview(projectID string, instructions string) (*Au
 		return nil, fmt.Errorf("instructions required")
 	}
 
-	resp, err := c.rpc.Do(rpc.Call{
-		ID: rpc.RPCCreateAudioOverview,
-		Args: []interface{}{
-			projectID,
-			0,
-			[]string{
-				instructions,
-			},
-		},
-		NotebookID: projectID,
-	})
+   // Trigger audio generation: third argument expected as string rather than string array
+   resp, err := c.rpc.Do(rpc.Call{
+       ID: rpc.RPCCreateAudioOverview,
+       Args: []interface{}{
+           projectID,
+           0,
+           instructions,
+       },
+       NotebookID: projectID,
+   })
 	if err != nil {
 		return nil, fmt.Errorf("create audio overview: %w", err)
 	}
@@ -641,12 +640,29 @@ func (c *Client) CreateAudioOverview(projectID string, instructions string) (*Au
    }
 
    // Check for server-side errors in the response envelope
-   if first, ok := data[0].([]interface{}); ok && len(first) > 5 {
-       if errInfo, ok2 := first[5].([]interface{}); ok2 && len(errInfo) > 0 {
-           if code, ok3 := errInfo[0].(float64); ok3 && code != 0 {
-               return nil, fmt.Errorf("audio creation error, code=%v", code)
+   // Primary case: error info in nested data[0][5]
+   var codeVal float64
+   var hasErr bool
+   if firstArr, ok := data[0].([]interface{}); ok && len(firstArr) > 5 {
+       if errInfo, ok2 := firstArr[5].([]interface{}); ok2 && len(errInfo) > 0 {
+           if code, ok3 := errInfo[0].(float64); ok3 {
+               codeVal = code
+               hasErr = codeVal != 0
            }
        }
+   }
+   // Fallback case: flat data[5]
+   if !hasErr && len(data) > 5 {
+       if errInfo, ok2 := data[5].([]interface{}); ok2 && len(errInfo) > 0 {
+           if code, ok3 := errInfo[0].(float64); ok3 {
+               codeVal = code
+               hasErr = codeVal != 0
+           }
+       }
+   }
+   if hasErr {
+       // Include raw response data for debugging
+       return nil, fmt.Errorf("audio creation error (code=%v), response: %s", codeVal, string(resp))
    }
 
    // Parse the wrb.fr response format for audio data
