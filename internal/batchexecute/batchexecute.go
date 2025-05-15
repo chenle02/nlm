@@ -192,10 +192,10 @@ var debug = true
 
 // decodeResponse decodes the batchexecute response
 func decodeResponse(raw string) ([]Response, error) {
-   // Remove JSON prefix
-   raw = strings.TrimPrefix(raw, ")]}'")
-   // Handle literal "\n" sequences (e.g., in raw string inputs) as newlines
-   raw = strings.ReplaceAll(raw, "\\n", "\n")
+	// Remove JSON prefix
+	raw = strings.TrimPrefix(raw, ")]}'")
+	// Handle literal "\n" sequences (e.g., in raw string inputs) as newlines
+	raw = strings.ReplaceAll(raw, "\\n", "\n")
 	if raw == "" {
 		return nil, fmt.Errorf("empty response after trimming prefix")
 	}
@@ -265,49 +265,64 @@ func decodeResponse(raw string) ([]Response, error) {
 
 // decodeChunkedResponse decodes the batchexecute response
 func decodeChunkedResponse(raw string) ([]Response, error) {
-   raw = strings.TrimSpace(strings.TrimPrefix(raw, ")]}'"))
-   if raw == "" {
-       return nil, fmt.Errorf("empty response after trimming prefix")
-   }
-   reader := bufio.NewReader(strings.NewReader(raw))
-   var builder strings.Builder
-   for {
-       lengthLine, err := reader.ReadString('\n')
-       if err == io.EOF {
-           break
-       }
-       if err != nil {
-           return nil, fmt.Errorf("read length: %w", err)
-       }
-       lengthStr := strings.TrimSpace(lengthLine)
-       if lengthStr == "" {
-           continue
-       }
-       totalLength, err := strconv.Atoi(lengthStr)
-       if err != nil {
-           if debug {
-               fmt.Printf("Invalid length string: %q\n", lengthStr)
-           }
-           return nil, fmt.Errorf("invalid chunk length: %w", err)
-       }
-       if totalLength == 0 {
-           break
-       }
-       chunk := make([]byte, totalLength)
-       n, err := io.ReadFull(reader, chunk)
-       if err != nil {
-           if debug {
-               fmt.Printf("Failed to read chunk: got %d bytes, wanted %d: %v\n", n, totalLength, err)
-           }
-           return nil, fmt.Errorf("read chunk: %w", err)
-       }
-       builder.Write(chunk)
-   }
-   full := builder.String()
-   if debug {
-       fmt.Printf("Full chunked JSON: %s\n", full)
-   }
-   return decodeResponse(full)
+	raw = strings.TrimSpace(strings.TrimPrefix(raw, ")]}'"))
+	if raw == "" {
+		return nil, fmt.Errorf("empty response after trimming prefix")
+	}
+
+	// Try parsing as a regular response first
+	if responses, err := decodeResponse(raw); err == nil {
+		return responses, nil
+	}
+
+	// If that fails, try parsing as a chunked response
+	reader := bufio.NewReader(strings.NewReader(raw))
+	var builder strings.Builder
+	for {
+		lengthLine, err := reader.ReadString('\n')
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return nil, fmt.Errorf("read length: %w", err)
+		}
+		lengthStr := strings.TrimSpace(lengthLine)
+		if lengthStr == "" {
+			continue
+		}
+		totalLength, err := strconv.Atoi(lengthStr)
+		if err != nil {
+			if debug {
+				fmt.Printf("Invalid length string: %q\n", lengthStr)
+			}
+			// Try parsing as a regular response again
+			if responses, err := decodeResponse(raw); err == nil {
+				return responses, nil
+			}
+			return nil, fmt.Errorf("invalid chunk length: %w", err)
+		}
+		if totalLength == 0 {
+			break
+		}
+		chunk := make([]byte, totalLength)
+		n, err := io.ReadFull(reader, chunk)
+		if err != nil {
+			if debug {
+				fmt.Printf("Failed to read chunk: got %d bytes, wanted %d: %v\n", n, totalLength, err)
+			}
+			// Try parsing as a regular response again
+			if responses, err := decodeResponse(raw); err == nil {
+				return responses, nil
+			}
+			return nil, fmt.Errorf("read chunk: %w", err)
+		}
+		builder.Write(chunk)
+	}
+	full := builder.String()
+	if debug {
+		fmt.Printf("Full chunked JSON: %s\n", full)
+	}
+	return decodeResponse(full)
 }
 
 func handleChunk(chunk []byte, responses *[]Response) error {

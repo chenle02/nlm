@@ -19,8 +19,9 @@ log() {
 
 usage() {
   cat <<EOF
-Usage: $0 <path-to-pdf>
-Example: $0 chen_dalang-15-moments.pdf
+Usage: $0 <pdf-filename>
+Example: $0 chen_cranston_ea-17-dissipation.pdf
+Note: PDF files should be in the scripts directory
 Automates:
   - notebook creation (if needed)
   - PDF upload
@@ -143,10 +144,11 @@ upload_pdf() {
     exit 1
   fi
   
-  # Try to upload with timeout
-  local max_attempts=3
+  # Try to upload with timeout and retries
+  local max_attempts=5
   local attempt=1
   local success=false
+  local last_error=""
   
   while [[ $attempt -le $max_attempts ]]; do
     log "Upload attempt $attempt of $max_attempts..."
@@ -160,27 +162,63 @@ upload_pdf() {
     if [[ $exit_code -eq 0 ]] || \
        echo "$out" | grep -q "Adding " || \
        echo "$out" | grep -q "successfully added" || \
-       echo "$out" | grep -q "uploaded successfully"; then
+       echo "$out" | grep -q "uploaded successfully" || \
+       echo "$out" | grep -q "source ID"; then
       log "Upload succeeded"
       success=true
       break
     fi
     
+    # Check for specific error conditions
+    if echo "$out" | grep -q "could not find source ID in response structure"; then
+      # This is a known issue with JSON response handling
+      log "Warning: JSON response issue detected, but upload might have succeeded"
+      # Wait a bit and check if the file appears in sources
+      sleep 5
+      
+      # Try to verify the upload by checking sources multiple times
+      local verify_attempts=3
+      local verify_success=false
+      
+      while [[ $verify_attempts -gt 0 ]]; do
+        log "Verifying upload attempt $((4 - verify_attempts))..."
+        if nlm sources "$id" | grep -q "$(basename "$pdf")"; then
+          log "Upload verified through sources list"
+          verify_success=true
+          success=true
+          break
+        fi
+        log "Source not found in list, waiting before retry..."
+        sleep 5
+        verify_attempts=$((verify_attempts - 1))
+      done
+      
+      if [[ $verify_success == true ]]; then
+        break
+      fi
+    fi
+    
+    last_error="$out"
     log "Upload attempt $attempt failed: $out"
     attempt=$((attempt + 1))
-    [[ $attempt -le $max_attempts ]] && sleep 2
+    [[ $attempt -le $max_attempts ]] && sleep 5
   done
   
   if [[ $success == false ]]; then
     log "Failed to upload after $max_attempts attempts"
+    log "Last error: $last_error"
+    log "You can try to verify the upload manually with: nlm sources $id"
     exit 1
   fi
   
-  # Verify the upload by checking sources
-  log "Verifying upload..."
+  # Final verification
+  log "Performing final verification..."
   if ! nlm sources "$id" | grep -q "$(basename "$pdf")"; then
     log "Warning: PDF not found in notebook sources after upload"
-    # Don't exit here as the upload might still be processing
+    log "The upload might still be processing. You can check the status later with: nlm sources $id"
+    log "If the file doesn't appear after a few minutes, you may need to try uploading again"
+  else
+    log "Upload verified successfully"
   fi
 }
 
@@ -209,14 +247,24 @@ generate_and_download_audio() {
 
 main() {
   [[ $# -eq 1 ]] || usage
-  local pdf="$1"
-  [[ -f "$pdf" ]] || { echo "Error: '$pdf' not found." >&2; exit 1; }
+  local pdf_name="$1"
+  local pdf="${script_dir}/${pdf_name}"
+  
+  # Check if file exists in scripts directory
+  if [[ ! -f "$pdf" ]]; then
+    log "Error: PDF file '$pdf_name' not found in scripts directory"
+    log "Available PDF files:"
+    ls -1 "${script_dir}"/*.pdf 2>/dev/null | while read -r f; do
+      log "  $(basename "$f")"
+    done
+    exit 1
+  fi
 
   check_dependencies
   init_csv
 
   local base
-  base=$(basename "${pdf%.*}")
+  base=$(basename "${pdf_name%.*}")
 
   if check_notebook_exists "$base"; then
     log "Notebook '$base' already exists. Exiting."
