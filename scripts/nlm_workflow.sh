@@ -136,6 +136,11 @@ upload_pdf() {
 
 generate_and_download_audio() {
   local id="$1" output="$2" interval=10 tmp
+  # If output file already exists, skip generation
+  if [[ -s "$output" ]]; then
+    log "Audio file '$output' already exists; skipping generation"
+    return 0
+  fi
   log "Requesting audio overview for notebook id '$id'..."
   if ! nlm audio-create "$id" "Generate audio overview"; then
     log "Failed to request audio overview"

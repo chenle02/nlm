@@ -1,5 +1,6 @@
 .env
 *.backup
+*.wav
 
 scripts/dummy-test.pdf
 scripts/dummy2.pdf
@@ -8,3 +9,4 @@ scripts/notebooks.csv
 scripts/chen_ouyang_ea-23-parabolic.pdf
 chen_cranston_ea-17-dissipation.pdf
 test_add.sh
+
