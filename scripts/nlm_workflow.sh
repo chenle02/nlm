@@ -51,7 +51,7 @@ check_notebook_exists() {
   done
   
   # Check for exact title match (ignoring leading/trailing spaces)
-  if echo "$notebooks" | grep -q "^$title$"; then
+  if echo "$notebooks" | grep -q "$title$"; then
     log "Found exact match for notebook '$title'"
     return 0
   fi
