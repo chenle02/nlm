@@ -192,8 +192,8 @@ main() {
   nb_id=$(create_notebook "$base")
   upload_pdf "$nb_id" "$pdf"
 
-  # Generate and download audio overview (.wav)
-  local outfile="${script_dir}/${base}.wav"
+  # Generate and download audio overview (.wav) into the current working directory
+  local outfile="${PWD}/${base}.wav"
   generate_and_download_audio "$nb_id" "$outfile"
 
   log "Workflow complete. Audio saved to '$outfile'"
