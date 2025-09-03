@@ -11,6 +11,8 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
+	pb "github.com/tmc/nlm/gen/notebooklm/v1alpha1"
+	"github.com/tmc/nlm/internal/beprotojson"
 )
 
 //go:embed testdata/*txt
@@ -34,6 +36,21 @@ func TestDecodeResponse(t *testing.T) {
 				if len(resp) != 1 {
 					t.Errorf("Expected 1 response, got %d", len(resp))
 					return
+				}
+
+				var raw [][]json.RawMessage
+				if err := json.Unmarshal(resp[0].Data, &raw); err != nil {
+					t.Fatalf("Failed to unmarshal project list: %v", err)
+				}
+				if len(raw) != 2 {
+					t.Errorf("Expected 2 projects, got %d", len(raw))
+				}
+				var p pb.Project
+				if err := beprotojson.Unmarshal(raw[0][0], &p); err != nil {
+					t.Fatalf("Failed to parse first project: %v", err)
+				}
+				if p.GetTitle() != "Alpha" {
+					t.Errorf("Expected first project title Alpha, got %s", p.GetTitle())
 				}
 			},
 			err: nil,
