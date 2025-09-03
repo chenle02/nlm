@@ -20,10 +20,20 @@
 
  ## Usage
 
- 1. Authenticate with NotebookLM:
+ 1. Authenticate with NotebookLM (guided Chrome flow):
     ```bash
-    nlm auth
+    ./scripts/nlm_auth_chrome.sh
     ```
+    - This opens Chrome to NotebookLM. Log in if prompted.
+    - In DevTools Network, copy a `batchexecute` request as cURL (bash).
+    - The script reads it from your clipboard and writes `~/.nlm/env`.
+
+    Alternative (built-in flow):
+    ```bash
+    nlm -debug auth
+    ```
+    If the automated browser flow times out on Linux, prefer the guided script above.
+
  2. Run the workflow script against a PDF:
     ```bash
     ./nlm_workflow.sh path/to/document.pdf
