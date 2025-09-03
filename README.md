@@ -20,7 +20,15 @@
 ## Installation 🚀
 
 ```bash
-go install github.com/tmc/nlm/cmd/nlm@latest
+git clone https://github.com/chenle02/nlm
+cd nlm
+go install ./cmd/nlm
+```
+
+The `nlm` binary will be installed to `$(go env GOPATH)/bin`. Ensure this directory is included in your `PATH`:
+
+```bash
+export PATH="$(go env GOPATH)/bin:$PATH"
 ```
 
 ### Usage 
