@@ -5,12 +5,14 @@ import "google/protobuf/wrappers.proto";
 import "google/protobuf/timestamp.proto";
 
 package notebooklm.v1alpha1;
+option go_package = "github.com/tmc/nlm/gen/notebooklm/v1alpha1;notebooklmv1alpha1";
 
 message Project {
   string title = 1;
   repeated Source sources = 2;
   string project_id = 3;
   string emoji = 4;
+  string description = 5;
   ProjectMetadata metadata = 6;
   //ChatbotConfig config = 6;
   //AdvancedSettings advanced_settings = 7;
