@@ -2,17 +2,17 @@
 package api
 
 import (
-   "encoding/base64"
-   "encoding/json"
-   "fmt"
-   "io"
-   "net/http"
-   "net/url"
-   "os"
-   "os/exec"
-   "strings"
-   "path/filepath"
-   "time"
+	"encoding/base64"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"net/url"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"time"
 
 	"github.com/davecgh/go-spew/spew"
 	pb "github.com/tmc/nlm/gen/notebooklm/v1alpha1"
@@ -47,11 +47,22 @@ func (c *Client) ListRecentlyViewedProjects() ([]*Notebook, error) {
 		return nil, fmt.Errorf("list projects: %w", err)
 	}
 
-	var response pb.ListRecentlyViewedProjectsResponse
-	if err := beprotojson.Unmarshal(resp, &response); err != nil {
+	var raw [][]json.RawMessage
+	if err := json.Unmarshal(resp, &raw); err != nil {
 		return nil, fmt.Errorf("parse response: %w", err)
 	}
-	return response.Projects, nil
+	var projects []*pb.Project
+	for _, item := range raw {
+		if len(item) == 0 {
+			continue
+		}
+		var p pb.Project
+		if err := beprotojson.Unmarshal(item[0], &p); err != nil {
+			return nil, fmt.Errorf("parse project: %w", err)
+		}
+		projects = append(projects, &p)
+	}
+	return projects, nil
 }
 
 func (c *Client) CreateProject(title string, emoji string) (*Notebook, error) {
@@ -282,18 +293,18 @@ func (c *Client) AddSourceFromBase64(projectID string, content, filename, conten
 	resp, err := c.rpc.Do(rpc.Call{
 		ID:         rpc.RPCAddSources,
 		NotebookID: projectID,
-       Args: []interface{}{
-           []interface{}{
-               []interface{}{
-                   content,
-                   filename,
-                   contentType,
-                   "base64",
-                   pb.SourceType_SOURCE_TYPE_LOCAL_FILE,
-               },
-           },
-           projectID,
-       },
+		Args: []interface{}{
+			[]interface{}{
+				[]interface{}{
+					content,
+					filename,
+					contentType,
+					"base64",
+					pb.SourceType_SOURCE_TYPE_LOCAL_FILE,
+				},
+			},
+			projectID,
+		},
 	})
 	if err != nil {
 		return "", fmt.Errorf("add binary source: %w", err)
@@ -310,68 +321,68 @@ func (c *Client) AddSourceFromBase64(projectID string, content, filename, conten
 
 // AddSourceFromFile adds a source from a local file, with fallback polling for null responses.
 func (c *Client) AddSourceFromFile(projectID, filePath string) (string, error) {
-   f, err := os.Open(filePath)
-   if err != nil {
-       return "", fmt.Errorf("open file: %w", err)
-   }
-   defer f.Close()
+	f, err := os.Open(filePath)
+	if err != nil {
+		return "", fmt.Errorf("open file: %w", err)
+	}
+	defer f.Close()
 
-   if c.rpc.Config.Debug {
-       fmt.Fprintf(os.Stderr, "[AddSourceFromFile] DEBUG: Uploading file %q to notebook %q\n", filePath, projectID)
-   }
-   sourceID, err := c.AddSourceFromReader(projectID, f, filePath)
-   if err != nil {
-       // Handle null or missing response by polling for existence
-       if strings.Contains(err.Error(), "could not find source ID") || strings.Contains(err.Error(), "empty response") {
-           fmt.Fprintf(os.Stderr, "[AddSourceFromFile] WARNING: Got null response, polling for source...\n")
-           filename := filepath.Base(filePath)
-           base := filename
-           if ext := filepath.Ext(filename); ext != "" {
-               base = filename[:len(filename)-len(ext)]
-           }
-           for i := 0; i < 5; i++ {
-               time.Sleep(2 * time.Second)
-               sources, listErr := c.GetSources(projectID)
-               if listErr != nil {
-                   fmt.Fprintf(os.Stderr, "[AddSourceFromFile] Poll attempt %d: list error: %v\n", i+1, listErr)
-                   continue
-               }
-               // Debug: list all source titles
-               fmt.Fprintf(os.Stderr, "[AddSourceFromFile] Poll attempt %d: found %d sources:\n", i+1, len(sources))
-               for _, src := range sources {
-                   var sid string
-                   if src.SourceId != nil {
-                       sid = src.SourceId.SourceId
-                   }
-                   fmt.Fprintf(os.Stderr, "  - title=%q id=%s\n", src.Title, sid)
-               }
-               for _, src := range sources {
-                   title := strings.TrimSpace(src.Title)
-                   if title == filename || title == base {
-                       if src.SourceId != nil {
-                           fmt.Fprintf(os.Stderr, "[AddSourceFromFile] Matched source %q after polling\n", title)
-                           return src.SourceId.SourceId, nil
-                       }
-                   }
-               }
-               fmt.Fprintf(os.Stderr, "[AddSourceFromFile] Poll attempt %d: not found yet\n", i+1)
-           }
-           // Fallback for PDF: extract text via pdftotext and add as text source
-           if ext := strings.ToLower(filepath.Ext(filename)); ext == ".pdf" {
-               fmt.Fprintf(os.Stderr, "[AddSourceFromFile] Fallback: extracting text from PDF and uploading as text source\n")
-               cmd := exec.Command("pdftotext", filePath, "-")
-               txt, err2 := cmd.Output()
-               if err2 != nil {
-                   return "", fmt.Errorf("fallback pdftotext failed: %w", err2)
-               }
-               // Use filename (without path) as title
-               return c.AddSourceFromText(projectID, string(txt), filename)
-           }
-           return "", fmt.Errorf("upload verification failed: source %q not found after polling", filename)
-       }
-       return "", err
-   }
-   return sourceID, nil
+	if c.rpc.Config.Debug {
+		fmt.Fprintf(os.Stderr, "[AddSourceFromFile] DEBUG: Uploading file %q to notebook %q\n", filePath, projectID)
+	}
+	sourceID, err := c.AddSourceFromReader(projectID, f, filePath)
+	if err != nil {
+		// Handle null or missing response by polling for existence
+		if strings.Contains(err.Error(), "could not find source ID") || strings.Contains(err.Error(), "empty response") {
+			fmt.Fprintf(os.Stderr, "[AddSourceFromFile] WARNING: Got null response, polling for source...\n")
+			filename := filepath.Base(filePath)
+			base := filename
+			if ext := filepath.Ext(filename); ext != "" {
+				base = filename[:len(filename)-len(ext)]
+			}
+			for i := 0; i < 5; i++ {
+				time.Sleep(2 * time.Second)
+				sources, listErr := c.GetSources(projectID)
+				if listErr != nil {
+					fmt.Fprintf(os.Stderr, "[AddSourceFromFile] Poll attempt %d: list error: %v\n", i+1, listErr)
+					continue
+				}
+				// Debug: list all source titles
+				fmt.Fprintf(os.Stderr, "[AddSourceFromFile] Poll attempt %d: found %d sources:\n", i+1, len(sources))
+				for _, src := range sources {
+					var sid string
+					if src.SourceId != nil {
+						sid = src.SourceId.SourceId
+					}
+					fmt.Fprintf(os.Stderr, "  - title=%q id=%s\n", src.Title, sid)
+				}
+				for _, src := range sources {
+					title := strings.TrimSpace(src.Title)
+					if title == filename || title == base {
+						if src.SourceId != nil {
+							fmt.Fprintf(os.Stderr, "[AddSourceFromFile] Matched source %q after polling\n", title)
+							return src.SourceId.SourceId, nil
+						}
+					}
+				}
+				fmt.Fprintf(os.Stderr, "[AddSourceFromFile] Poll attempt %d: not found yet\n", i+1)
+			}
+			// Fallback for PDF: extract text via pdftotext and add as text source
+			if ext := strings.ToLower(filepath.Ext(filename)); ext == ".pdf" {
+				fmt.Fprintf(os.Stderr, "[AddSourceFromFile] Fallback: extracting text from PDF and uploading as text source\n")
+				cmd := exec.Command("pdftotext", filePath, "-")
+				txt, err2 := cmd.Output()
+				if err2 != nil {
+					return "", fmt.Errorf("fallback pdftotext failed: %w", err2)
+				}
+				// Use filename (without path) as title
+				return c.AddSourceFromText(projectID, string(txt), filename)
+			}
+			return "", fmt.Errorf("upload verification failed: source %q not found after polling", filename)
+		}
+		return "", err
+	}
+	return sourceID, nil
 }
 
 func (c *Client) AddSourceFromURL(projectID string, url string) (string, error) {
@@ -611,59 +622,59 @@ func (c *Client) CreateAudioOverview(projectID string, instructions string) (*Au
 		return nil, fmt.Errorf("instructions required")
 	}
 
-   // Trigger audio generation: third argument expected as string rather than string array
-   // Invoke CreateAudioOverview RPC: args are [notebookID, 0, [instructions]]
-   resp, err := c.rpc.Do(rpc.Call{
-       ID: rpc.RPCCreateAudioOverview,
-       Args: []interface{}{
-           projectID,
-           0,
-           []interface{}{instructions},
-       },
-       NotebookID: projectID,
-   })
+	// Trigger audio generation: third argument expected as string rather than string array
+	// Invoke CreateAudioOverview RPC: args are [notebookID, 0, [instructions]]
+	resp, err := c.rpc.Do(rpc.Call{
+		ID: rpc.RPCCreateAudioOverview,
+		Args: []interface{}{
+			projectID,
+			0,
+			[]interface{}{instructions},
+		},
+		NotebookID: projectID,
+	})
 	if err != nil {
 		return nil, fmt.Errorf("create audio overview: %w", err)
 	}
 
-   var data []interface{}
-   if err := json.Unmarshal(resp, &data); err != nil {
-       return nil, fmt.Errorf("parse response JSON: %w", err)
-   }
+	var data []interface{}
+	if err := json.Unmarshal(resp, &data); err != nil {
+		return nil, fmt.Errorf("parse response JSON: %w", err)
+	}
 
-   result := &AudioOverviewResult{
-       ProjectID: projectID,
-   }
+	result := &AudioOverviewResult{
+		ProjectID: projectID,
+	}
 
-   // Handle empty or nil response
-   if len(data) == 0 {
-       return result, nil
-   }
+	// Handle empty or nil response
+	if len(data) == 0 {
+		return result, nil
+	}
 
-   // Check for server-side errors in RPC envelope: error details in data[5]
-   if len(data) > 5 {
-       if errInfo, ok := data[5].([]interface{}); ok && len(errInfo) > 0 {
-           if code, ok2 := errInfo[0].(float64); ok2 && code != 0 {
-               // Code 8 indicates daily audio limit reached
-               if int(code) == 8 {
-                   return nil, fmt.Errorf("You have reached your daily Audio Overview limit. Please try again later.")
-               }
-               return nil, fmt.Errorf("audio creation failed (code=%v), detail=%v", code, errInfo)
-           }
-       }
-   }
+	// Check for server-side errors in RPC envelope: error details in data[5]
+	if len(data) > 5 {
+		if errInfo, ok := data[5].([]interface{}); ok && len(errInfo) > 0 {
+			if code, ok2 := errInfo[0].(float64); ok2 && code != 0 {
+				// Code 8 indicates daily audio limit reached
+				if int(code) == 8 {
+					return nil, fmt.Errorf("You have reached your daily Audio Overview limit. Please try again later.")
+				}
+				return nil, fmt.Errorf("audio creation failed (code=%v), detail=%v", code, errInfo)
+			}
+		}
+	}
 
-   // Parse the wrb.fr response format for audio data
-   // Format: [null,null,[3,"<base64-audio>","<id>","<title>",null,true],null,[false]]
-   if len(data) > 2 {
-       audioData, ok := data[2].([]interface{})
-       if !ok {
-           return nil, fmt.Errorf("invalid audio data format")
-       }
-       if len(audioData) < 4 {
-           // Creation might be in progress, return result without error
-           return result, nil
-       }
+	// Parse the wrb.fr response format for audio data
+	// Format: [null,null,[3,"<base64-audio>","<id>","<title>",null,true],null,[false]]
+	if len(data) > 2 {
+		audioData, ok := data[2].([]interface{})
+		if !ok {
+			return nil, fmt.Errorf("invalid audio data format")
+		}
+		if len(audioData) < 4 {
+			// Creation might be in progress, return result without error
+			return result, nil
+		}
 
 		// Extract audio data (index 1)
 		if audioBase64, ok := audioData[1].(string); ok {
@@ -718,18 +729,18 @@ func (c *Client) GetAudioOverview(projectID string) (*AudioOverviewResult, error
 		return result, nil
 	}
 
-   // Parse the wrb.fr response format for audio data
-   // Format: [null,null,[3,"<base64-audio>","<id>","<title>",null,true],null,[false]]
-   if len(data) > 2 {
-       audioData, ok := data[2].([]interface{})
-       if !ok {
-           // Data not as expected; audio not ready
-           return result, nil
-       }
-       if len(audioData) < 4 {
-           // Audio not ready yet
-           return result, nil
-       }
+	// Parse the wrb.fr response format for audio data
+	// Format: [null,null,[3,"<base64-audio>","<id>","<title>",null,true],null,[false]]
+	if len(data) > 2 {
+		audioData, ok := data[2].([]interface{})
+		if !ok {
+			// Data not as expected; audio not ready
+			return result, nil
+		}
+		if len(audioData) < 4 {
+			// Audio not ready yet
+			return result, nil
+		}
 
 		// Extract audio data (index 1)
 		if audioBase64, ok := audioData[1].(string); ok {
@@ -969,17 +980,17 @@ func extractYouTubeVideoID(urlStr string) (string, error) {
 
 // GetSources returns the list of sources in the given notebook.
 func (c *Client) GetSources(projectID string) ([]*pb.Source, error) {
-   resp, err := c.rpc.Do(rpc.Call{
-       ID:         rpc.RPCGetProject,
-       Args:       []interface{}{projectID},
-       NotebookID: projectID,
-   })
-   if err != nil {
-       return nil, fmt.Errorf("get project: %w", err)
-   }
-   var project pb.Project
-   if err := beprotojson.Unmarshal(resp, &project); err != nil {
-       return nil, fmt.Errorf("parse project response: %w", err)
-   }
-   return project.GetSources(), nil
+	resp, err := c.rpc.Do(rpc.Call{
+		ID:         rpc.RPCGetProject,
+		Args:       []interface{}{projectID},
+		NotebookID: projectID,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("get project: %w", err)
+	}
+	var project pb.Project
+	if err := beprotojson.Unmarshal(resp, &project); err != nil {
+		return nil, fmt.Errorf("parse project response: %w", err)
+	}
+	return project.GetSources(), nil
 }

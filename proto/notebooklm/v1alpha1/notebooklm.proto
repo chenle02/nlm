@@ -152,8 +152,13 @@ message StartSectionResponse {
 
 
 
+message RecentlyViewedProject {
+  Project project = 1;
+  google.protobuf.Timestamp last_view_time = 2;
+}
+
 message ListRecentlyViewedProjectsResponse {
-  repeated Project projects = 1;
+  repeated RecentlyViewedProject projects = 1;
 }
 
 
@@ -299,3 +304,5 @@ service NotebookLMGuidebooks {
         option (rpc_id) = "OTl0K";
     }
 }
+
+*/
