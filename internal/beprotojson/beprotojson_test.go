@@ -1,6 +1,7 @@
 package beprotojson
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
@@ -197,6 +198,39 @@ func TestUnmarshalOptions(t *testing.T) {
 				t.Errorf("UnmarshalOptions.Unmarshal() diff (-want +got):\n%s", diff)
 			}
 		})
+	}
+}
+
+func TestUnmarshalRepeatedFieldErrors(t *testing.T) {
+	json := `["project1", "oops", "id1", "📚"]`
+	err := Unmarshal([]byte(json), &pb.Project{})
+	if err == nil {
+		t.Fatalf("Unmarshal() error = nil, want non-nil")
+	}
+	if !strings.Contains(err.Error(), "sources") || !strings.Contains(err.Error(), "oops") {
+		t.Fatalf("error %q does not include field name and value", err)
+	}
+}
+
+func TestUnmarshalRepeatedFieldJSONString(t *testing.T) {
+	json := `["project1", "[[[\"source1\"], \"Source One\"]]", "id1", "📚"]`
+	want := &pb.Project{
+		Title: "project1",
+		Sources: []*pb.Source{
+			{
+				SourceId: &pb.SourceId{SourceId: "source1"},
+				Title:    "Source One",
+			},
+		},
+		ProjectId: "id1",
+		Emoji:     "📚",
+	}
+	got := &pb.Project{}
+	if err := Unmarshal([]byte(json), got); err != nil {
+		t.Fatalf("Unmarshal() error = %v", err)
+	}
+	if diff := cmp.Diff(want, got, protocmp.Transform()); diff != "" {
+		t.Fatalf("Unmarshal() diff (-want +got):\n%s", diff)
 	}
 }
 

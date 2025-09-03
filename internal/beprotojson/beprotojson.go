@@ -95,9 +95,17 @@ func (o UnmarshalOptions) setField(m protoreflect.Message, fd protoreflect.Field
 }
 
 func (o UnmarshalOptions) setRepeatedField(m protoreflect.Message, fd protoreflect.FieldDescriptor, val interface{}) error {
+	// Attempt to handle JSON-encoded strings that represent arrays.
+	if s, ok := val.(string); ok {
+		var decoded []interface{}
+		if err := json.Unmarshal([]byte(s), &decoded); err == nil {
+			val = decoded
+		}
+	}
+
 	arr, ok := val.([]interface{})
 	if !ok {
-		return fmt.Errorf("expected array for repeated field, got %T", val)
+		return fmt.Errorf("expected array for repeated field %s, got %T with value %v", fd.Name(), val, val)
 	}
 
 	list := m.Mutable(fd).List()
