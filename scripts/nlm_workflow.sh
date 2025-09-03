@@ -76,10 +76,10 @@ create_notebook() {
     log "Failed to create notebook: $out"
     exit 1
   }
-  # Extract notebook ID (UUID)
-  id=$(echo "$out" | grep -Eo '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}' | head -1)
+  # Extract notebook ID (UUID) allowing prefixes and uppercase hex
+  id=$(echo "$out" | grep -Eo '[0-9A-Fa-f-]{36}' | head -1)
   if [[ -z "$id" ]]; then
-    log "Failed to parse notebook ID from create output"
+    log "Failed to parse notebook ID from create output: $out"
     exit 1
   fi
   echo "$id"
