@@ -1249,12 +1249,49 @@ func (*StartSectionResponse) Descriptor() ([]byte, []int) {
 	return file_notebooklm_v1alpha1_notebooklm_proto_rawDescGZIP(), []int{17}
 }
 
+type RecentlyViewedProject struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+
+	Project      *Project               `protobuf:"bytes,1,opt,name=project,proto3" json:"project,omitempty"`
+	LastViewTime *timestamppb.Timestamp `protobuf:"bytes,2,opt,name=last_view_time,json=lastViewTime,proto3" json:"last_view_time,omitempty"`
+}
+
+func (x *RecentlyViewedProject) Reset() { *x = RecentlyViewedProject{} }
+
+func (x *RecentlyViewedProject) String() string { return protoimpl.X.MessageStringOf(x) }
+
+func (*RecentlyViewedProject) ProtoMessage() {}
+
+func (x *RecentlyViewedProject) ProtoReflect() protoreflect.Message {
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	if protoimpl.UnsafeEnabled && ms.LoadMessageInfo() == nil {
+		ms.StoreMessageInfo(&protoimpl.MessageInfo{})
+	}
+	return ms
+}
+
+func (x *RecentlyViewedProject) GetProject() *Project {
+	if x != nil {
+		return x.Project
+	}
+	return nil
+}
+
+func (x *RecentlyViewedProject) GetLastViewTime() *timestamppb.Timestamp {
+	if x != nil {
+		return x.LastViewTime
+	}
+	return nil
+}
+
 type ListRecentlyViewedProjectsResponse struct {
 	state         protoimpl.MessageState
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
 
-	Projects []*Project `protobuf:"bytes,1,rep,name=projects,proto3" json:"projects,omitempty"`
+	Projects []*RecentlyViewedProject `protobuf:"bytes,1,rep,name=projects,proto3" json:"projects,omitempty"`
 }
 
 func (x *ListRecentlyViewedProjectsResponse) Reset() {
@@ -1289,7 +1326,7 @@ func (*ListRecentlyViewedProjectsResponse) Descriptor() ([]byte, []int) {
 	return file_notebooklm_v1alpha1_notebooklm_proto_rawDescGZIP(), []int{18}
 }
 
-func (x *ListRecentlyViewedProjectsResponse) GetProjects() []*Project {
+func (x *ListRecentlyViewedProjectsResponse) GetProjects() []*RecentlyViewedProject {
 	if x != nil {
 		return x.Projects
 	}

@@ -115,7 +115,7 @@ func TestDecodeResponse(t *testing.T) {
 				{
 					ID:    "izAoDd",
 					Index: 0,
-					Data:  json.RawMessage(`null`),
+					Data:  json.RawMessage(`["wrb.fr","izAoDd",null,null,null,[3],"generic"]`),
 				},
 			},
 			err: nil,
