@@ -115,7 +115,7 @@ func TestDecodeResponse(t *testing.T) {
 				{
 					ID:    "izAoDd",
 					Index: 0,
-					Data:  json.RawMessage(`null`),
+					Data:  json.RawMessage(`["wrb.fr","izAoDd",null,null,null,[3],"generic"]`),
 				},
 			},
 			err: nil,
@@ -234,5 +234,33 @@ func TestExecute(t *testing.T) {
 	expectedData := json.RawMessage(`[null,null,[3,null,"fec1780c-5a14-4f07-8ee6-f8c3ee2930fa","nbname2",null,true],null,[false]]`)
 	if string(response.Data) != string(expectedData) {
 		t.Errorf("Unexpected response data:\ngot:  %s\nwant: %s", string(response.Data), string(expectedData))
+	}
+}
+
+func TestExecuteErrorChunk(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Return a chunked error response
+		errorChunk := `[["e",4,null,null,237]]`
+		fmt.Fprintf(w, ")]}'\n%d\n%s\n", len(errorChunk), errorChunk)
+	}))
+	defer server.Close()
+
+	config := Config{
+		Host:      strings.TrimPrefix(server.URL, "http://"),
+		App:       "notebooklm",
+		AuthToken: "test_token",
+		Headers:   map[string]string{"Content-Type": "application/x-www-form-urlencoded"},
+		UseHTTP:   true,
+	}
+	client := NewClient(config, WithHTTPClient(server.Client()))
+
+	rpc := RPC{ID: "test", Args: []interface{}{}, Index: "generic"}
+
+	response, err := client.Execute([]RPC{rpc})
+	if err != nil {
+		t.Fatalf("Execute returned error: %v", err)
+	}
+	if response.Error != "237" {
+		t.Fatalf("expected error 237, got %q", response.Error)
 	}
 }

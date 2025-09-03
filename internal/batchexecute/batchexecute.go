@@ -185,6 +185,12 @@ func (c *Client) Execute(rpcs []RPC) (*Response, error) {
 		return nil, fmt.Errorf("no valid responses found")
 	}
 
+	for _, resp := range responses {
+		if resp.Error != "" {
+			return &resp, nil
+		}
+	}
+
 	return &responses[0], nil
 }
 
@@ -281,7 +287,7 @@ func decodeChunkedResponse(raw string) ([]Response, error) {
 
 	// If that fails, try parsing as a chunked response
 	reader := bufio.NewReader(strings.NewReader(raw))
-	var builder strings.Builder
+	var responses []Response
 	for {
 		lengthLine, err := reader.ReadString('\n')
 		if err == io.EOF {
@@ -300,8 +306,8 @@ func decodeChunkedResponse(raw string) ([]Response, error) {
 				fmt.Printf("Invalid length string: %q\n", lengthStr)
 			}
 			// Try parsing as a regular response again
-			if responses, err := decodeResponse(raw); err == nil {
-				return responses, nil
+			if responses2, err := decodeResponse(raw); err == nil {
+				return responses2, nil
 			}
 			return nil, fmt.Errorf("invalid chunk length: %w", err)
 		}
@@ -315,18 +321,19 @@ func decodeChunkedResponse(raw string) ([]Response, error) {
 				fmt.Printf("Failed to read chunk: got %d bytes, wanted %d: %v\n", n, totalLength, err)
 			}
 			// Try parsing as a regular response again
-			if responses, err := decodeResponse(raw); err == nil {
-				return responses, nil
+			if responses2, err := decodeResponse(raw); err == nil {
+				return responses2, nil
 			}
 			return nil, fmt.Errorf("read chunk: %w", err)
 		}
-		builder.Write(chunk)
+		if err := handleChunk(chunk, &responses); err != nil {
+			return nil, err
+		}
 	}
-	full := builder.String()
-	if debug {
-		fmt.Printf("Full chunked JSON: %s\n", full)
+	if len(responses) == 0 {
+		return nil, fmt.Errorf("no valid responses found")
 	}
-	return decodeResponse(full)
+	return responses, nil
 }
 
 func handleChunk(chunk []byte, responses *[]Response) error {
@@ -343,6 +350,18 @@ func handleChunk(chunk []byte, responses *[]Response) error {
 
 	// Process each RPC response in the batch
 	for _, rpcData := range rpcBatch {
+		if len(rpcData) > 0 {
+			if rpcType, ok := rpcData[0].(string); ok && rpcType == "e" {
+				var errMsg string
+				if len(rpcData) > 4 {
+					errMsg = fmt.Sprint(rpcData[4])
+				} else {
+					errMsg = "unknown error"
+				}
+				*responses = append(*responses, Response{Error: errMsg})
+				continue
+			}
+		}
 		if len(rpcData) < 7 {
 			if debug {
 				fmt.Printf("Skipping short RPC data: %v\n", rpcData)

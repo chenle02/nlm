@@ -153,6 +153,10 @@ func (c *Client) Do(call Call) (json.RawMessage, error) {
 		return nil, fmt.Errorf("execute rpc: %w", err)
 	}
 
+	if resp.Error != "" {
+		return nil, fmt.Errorf(resp.Error)
+	}
+
 	if c.Config.Debug {
 		fmt.Printf("\nRPC Response:\n")
 		spew.Dump(resp)
