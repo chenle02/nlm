@@ -38,7 +38,7 @@ func New(authToken, cookies string, opts ...batchexecute.Option) *Client {
 
 // Project/Notebook operations
 
-func (c *Client) ListRecentlyViewedProjects() ([]*Notebook, error) {
+func (c *Client) ListRecentlyViewedProjects() ([]*pb.RecentlyViewedProject, error) {
 	resp, err := c.rpc.Do(rpc.Call{
 		ID:   rpc.RPCListRecentlyViewedProjects,
 		Args: []interface{}{nil, 1},
@@ -51,13 +51,18 @@ func (c *Client) ListRecentlyViewedProjects() ([]*Notebook, error) {
 	if err := json.Unmarshal(resp, &raw); err != nil {
 		return nil, fmt.Errorf("parse response: %w", err)
 	}
-	var projects []*pb.Project
+
+	var projects []*pb.RecentlyViewedProject
 	for _, item := range raw {
 		if len(item) == 0 {
 			continue
 		}
-		var p pb.Project
-		if err := beprotojson.Unmarshal(item[0], &p); err != nil {
+		data, err := json.Marshal(item)
+		if err != nil {
+			return nil, fmt.Errorf("marshal project: %w", err)
+		}
+		var p pb.RecentlyViewedProject
+		if err := beprotojson.Unmarshal(data, &p); err != nil {
 			return nil, fmt.Errorf("parse project: %w", err)
 		}
 		projects = append(projects, &p)

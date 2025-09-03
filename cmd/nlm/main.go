@@ -34,7 +34,7 @@ func main() {
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "Usage: nlm <command> [arguments]\n\n")
 		fmt.Fprintf(os.Stderr, "Notebook Commands:\n")
-		fmt.Fprintf(os.Stderr, "  list, ls          List all notebooks\n")
+		fmt.Fprintf(os.Stderr, "  list, ls          List recently viewed notebooks\n")
 		fmt.Fprintf(os.Stderr, "  create <title>    Create a new notebook\n")
 		fmt.Fprintf(os.Stderr, "  rm <id>           Delete a notebook\n")
 		fmt.Fprintf(os.Stderr, "  analytics <id>    Show notebook analytics\n\n")
@@ -96,29 +96,29 @@ func run() error {
 	cmd := flag.Arg(0)
 	args := flag.Args()[1:]
 
-   // Prepare options for batchexecute, including debug if requested
-   var optsExec []batchexecute.Option
-   if debug {
-       optsExec = append(optsExec, batchexecute.WithDebug(true))
-   }
-   for i := 0; i < 3; i++ {
+	// Prepare options for batchexecute, including debug if requested
+	var optsExec []batchexecute.Option
+	if debug {
+		optsExec = append(optsExec, batchexecute.WithDebug(true))
+	}
+	for i := 0; i < 3; i++ {
 		if i > 1 {
 			fmt.Fprintln(os.Stderr, "nlm: attempting again to obtain login information")
 			debug = true
 		}
 
-       // Attempt the command; enable debug after second failure as well
-       currentOpts := optsExec
-       if i > 1 && !debug {
-           // turn on debug on retry
-           currentOpts = append(currentOpts, batchexecute.WithDebug(true))
-       }
-       client := api.New(authToken, cookies, currentOpts...)
-       if err := runCmd(client, cmd, args...); err == nil {
-           return nil
-       } else if !errors.Is(err, batchexecute.ErrUnauthorized) {
-           return err
-       }
+		// Attempt the command; enable debug after second failure as well
+		currentOpts := optsExec
+		if i > 1 && !debug {
+			// turn on debug on retry
+			currentOpts = append(currentOpts, batchexecute.WithDebug(true))
+		}
+		client := api.New(authToken, cookies, currentOpts...)
+		if err := runCmd(client, cmd, args...); err == nil {
+			return nil
+		} else if !errors.Is(err, batchexecute.ErrUnauthorized) {
+			return err
+		}
 
 		var err error
 		if authToken, cookies, err = handleAuth(nil, debug); err != nil {
@@ -133,7 +133,11 @@ func runCmd(client *api.Client, cmd string, args ...string) error {
 	switch cmd {
 	// Notebook operations
 	case "list", "ls":
-		err = list(client)
+		var recents []*pb.RecentlyViewedProject
+		recents, err = client.ListRecentlyViewedProjects()
+		if err == nil {
+			err = list(recents)
+		}
 	case "create":
 		if len(args) != 1 {
 			log.Fatal("usage: nlm create <title>")
@@ -255,17 +259,17 @@ func runCmd(client *api.Client, cmd string, args ...string) error {
 }
 
 // Notebook operations
-func list(c *api.Client) error {
-	notebooks, err := c.ListRecentlyViewedProjects()
-	if err != nil {
-		return err
-	}
+func list(recent []*pb.RecentlyViewedProject) error {
 	w := tabwriter.NewWriter(os.Stdout, 0, 4, 4, ' ', 0)
-	fmt.Fprintln(w, "ID\tTITLE\tLAST UPDATED")
-	for _, nb := range notebooks {
+	fmt.Fprintln(w, "ID\tTITLE\tLAST VIEWED")
+	for _, nb := range recent {
+		p := nb.GetProject()
+		if p == nil {
+			continue
+		}
 		fmt.Fprintf(w, "%s\t%s\t%s\n",
-			nb.ProjectId, strings.TrimSpace(nb.Emoji)+" "+nb.Title,
-			nb.GetMetadata().GetCreateTime().AsTime().Format(time.RFC3339),
+			p.GetProjectId(), strings.TrimSpace(p.GetEmoji())+" "+p.GetTitle(),
+			nb.GetLastViewTime().AsTime().Format(time.RFC3339),
 		)
 	}
 	return w.Flush()
