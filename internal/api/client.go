@@ -38,7 +38,7 @@ func New(authToken, cookies string, opts ...batchexecute.Option) *Client {
 
 // Project/Notebook operations
 
-func (c *Client) ListRecentlyViewedProjects() ([]*Notebook, error) {
+func (c *Client) ListRecentlyViewedProjects() ([]*pb.RecentlyViewedProject, error) {
 	resp, err := c.rpc.Do(rpc.Call{
 		ID:   rpc.RPCListRecentlyViewedProjects,
 		Args: []interface{}{nil, 1},
@@ -47,22 +47,20 @@ func (c *Client) ListRecentlyViewedProjects() ([]*Notebook, error) {
 		return nil, fmt.Errorf("list projects: %w", err)
 	}
 
-	var raw [][]json.RawMessage
-	if err := json.Unmarshal(resp, &raw); err != nil {
+	data := resp
+	if len(data) > 0 && data[0] == '"' {
+		var s string
+		if err := json.Unmarshal(data, &s); err != nil {
+			return nil, fmt.Errorf("unquote response: %w", err)
+		}
+		data = []byte(s)
+	}
+
+	var result pb.ListRecentlyViewedProjectsResponse
+	if err := beprotojson.Unmarshal(data, &result); err != nil {
 		return nil, fmt.Errorf("parse response: %w", err)
 	}
-	var projects []*pb.Project
-	for _, item := range raw {
-		if len(item) == 0 {
-			continue
-		}
-		var p pb.Project
-		if err := beprotojson.Unmarshal(item[0], &p); err != nil {
-			return nil, fmt.Errorf("parse project: %w", err)
-		}
-		projects = append(projects, &p)
-	}
-	return projects, nil
+	return result.GetProjects(), nil
 }
 
 func (c *Client) CreateProject(title string, emoji string) (*Notebook, error) {
