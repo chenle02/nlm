@@ -96,29 +96,29 @@ func run() error {
 	cmd := flag.Arg(0)
 	args := flag.Args()[1:]
 
-   // Prepare options for batchexecute, including debug if requested
-   var optsExec []batchexecute.Option
-   if debug {
-       optsExec = append(optsExec, batchexecute.WithDebug(true))
-   }
-   for i := 0; i < 3; i++ {
+	// Prepare options for batchexecute, including debug if requested
+	var optsExec []batchexecute.Option
+	if debug {
+		optsExec = append(optsExec, batchexecute.WithDebug(true))
+	}
+	for i := 0; i < 3; i++ {
 		if i > 1 {
 			fmt.Fprintln(os.Stderr, "nlm: attempting again to obtain login information")
 			debug = true
 		}
 
-       // Attempt the command; enable debug after second failure as well
-       currentOpts := optsExec
-       if i > 1 && !debug {
-           // turn on debug on retry
-           currentOpts = append(currentOpts, batchexecute.WithDebug(true))
-       }
-       client := api.New(authToken, cookies, currentOpts...)
-       if err := runCmd(client, cmd, args...); err == nil {
-           return nil
-       } else if !errors.Is(err, batchexecute.ErrUnauthorized) {
-           return err
-       }
+		// Attempt the command; enable debug after second failure as well
+		currentOpts := optsExec
+		if i > 1 && !debug {
+			// turn on debug on retry
+			currentOpts = append(currentOpts, batchexecute.WithDebug(true))
+		}
+		client := api.New(authToken, cookies, currentOpts...)
+		if err := runCmd(client, cmd, args...); err == nil {
+			return nil
+		} else if !errors.Is(err, batchexecute.ErrUnauthorized) {
+			return err
+		}
 
 		var err error
 		if authToken, cookies, err = handleAuth(nil, debug); err != nil {
@@ -256,16 +256,17 @@ func runCmd(client *api.Client, cmd string, args ...string) error {
 
 // Notebook operations
 func list(c *api.Client) error {
-	notebooks, err := c.ListRecentlyViewedProjects()
+	projects, err := c.ListRecentlyViewedProjects()
 	if err != nil {
 		return err
 	}
 	w := tabwriter.NewWriter(os.Stdout, 0, 4, 4, ' ', 0)
-	fmt.Fprintln(w, "ID\tTITLE\tLAST UPDATED")
-	for _, nb := range notebooks {
+	fmt.Fprintln(w, "ID\tTITLE\tLAST VIEWED")
+	for _, p := range projects {
+		prj := p.GetProject()
 		fmt.Fprintf(w, "%s\t%s\t%s\n",
-			nb.ProjectId, strings.TrimSpace(nb.Emoji)+" "+nb.Title,
-			nb.GetMetadata().GetCreateTime().AsTime().Format(time.RFC3339),
+			prj.GetProjectId(), strings.TrimSpace(prj.GetEmoji())+" "+prj.GetTitle(),
+			p.GetLastViewTime().AsTime().Format(time.RFC3339),
 		)
 	}
 	return w.Flush()
