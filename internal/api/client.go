@@ -19,6 +19,7 @@ import (
 	"github.com/tmc/nlm/internal/batchexecute"
 	"github.com/tmc/nlm/internal/beprotojson"
 	"github.com/tmc/nlm/internal/rpc"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 type Notebook = pb.Project
@@ -56,11 +57,85 @@ func (c *Client) ListRecentlyViewedProjects() ([]*pb.RecentlyViewedProject, erro
 		data = []byte(s)
 	}
 
-	var result pb.ListRecentlyViewedProjectsResponse
-	if err := beprotojson.Unmarshal(data, &result); err != nil {
+	// Parse the response manually since the format doesn't match the protobuf
+	var rawResponse []interface{}
+	if err := json.Unmarshal(data, &rawResponse); err != nil {
 		return nil, fmt.Errorf("parse response: %w", err)
 	}
-	return result.GetProjects(), nil
+
+	// Navigate to the projects array
+	if len(rawResponse) == 0 {
+		return []*pb.RecentlyViewedProject{}, nil
+	}
+
+	projectsArray, ok := rawResponse[0].([]interface{})
+	if !ok || len(projectsArray) == 0 {
+		return []*pb.RecentlyViewedProject{}, nil
+	}
+
+	var result []*pb.RecentlyViewedProject
+	for _, projectData := range projectsArray {
+		projectArray, ok := projectData.([]interface{})
+		if !ok || len(projectArray) < 5 {
+			continue
+		}
+
+		// Extract project information from the array
+		// Format: [title, sources, project_id, emoji, null, metadata, ...]
+		title, _ := projectArray[0].(string)
+		projectID, _ := projectArray[2].(string)
+		emoji, _ := projectArray[3].(string)
+
+		// Extract last view time from metadata array
+		var lastViewTime *timestamppb.Timestamp
+		if len(projectArray) > 5 {
+			if metadata, ok := projectArray[5].([]interface{}); ok && len(metadata) > 5 {
+				// The timestamp is in metadata[5] as [seconds, nanos]
+				if timeData, ok := metadata[5].([]interface{}); ok && len(timeData) >= 2 {
+					if seconds, ok := timeData[0].(float64); ok {
+						if nanos, ok := timeData[1].(float64); ok {
+							lastViewTime = &timestamppb.Timestamp{
+								Seconds: int64(seconds),
+								Nanos:   int32(nanos),
+							}
+						}
+					}
+				}
+			}
+		}
+		
+		// If that didn't work, try the creation time from metadata[8]
+		if lastViewTime == nil && len(projectArray) > 5 {
+			if metadata, ok := projectArray[5].([]interface{}); ok && len(metadata) > 8 {
+				if timeData, ok := metadata[8].([]interface{}); ok && len(timeData) >= 2 {
+					if seconds, ok := timeData[0].(float64); ok {
+						if nanos, ok := timeData[1].(float64); ok {
+							lastViewTime = &timestamppb.Timestamp{
+								Seconds: int64(seconds),
+								Nanos:   int32(nanos),
+							}
+						}
+					}
+				}
+			}
+		}
+
+		// Create the project structure
+		project := &pb.Project{
+			ProjectId: projectID,
+			Title:     title,
+			Emoji:     emoji,
+		}
+
+		recentlyViewedProject := &pb.RecentlyViewedProject{
+			Project:      project,
+			LastViewTime: lastViewTime,
+		}
+
+		result = append(result, recentlyViewedProject)
+	}
+
+	return result, nil
 }
 
 func (c *Client) CreateProject(title string, emoji string) (*Notebook, error) {

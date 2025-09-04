@@ -106,7 +106,7 @@ func (ba *BrowserAuth) GetAuth(opts ...Option) (token, cookies string, err error
 	}
 	defer cancel()
 
-	ctx, cancel = context.WithTimeout(ctx, 60*time.Second)
+	ctx, cancel = context.WithTimeout(ctx, 120*time.Second)
 	defer cancel()
 
 	if ba.debug {
@@ -265,8 +265,13 @@ func (ba *BrowserAuth) extractAuthData(ctx context.Context) (token, cookies stri
 		return "", "", fmt.Errorf("failed to load page: %w", err)
 	}
 
+	// Give some time for JavaScript to load
+	if err := chromedp.Run(ctx, chromedp.Sleep(5*time.Second)); err != nil {
+		return "", "", fmt.Errorf("failed to wait for page: %w", err)
+	}
+
 	// Create timeout context
-	pollCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	pollCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
 
 	ticker := time.NewTicker(2 * time.Second)

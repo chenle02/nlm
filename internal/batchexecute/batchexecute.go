@@ -194,8 +194,6 @@ func (c *Client) Execute(rpcs []RPC) (*Response, error) {
 	return &responses[0], nil
 }
 
-var debug = true
-
 // decodeResponse decodes the batchexecute response
 func decodeResponse(raw string) ([]Response, error) {
 	// Remove JSON prefix
@@ -280,11 +278,6 @@ func decodeChunkedResponse(raw string) ([]Response, error) {
 		return nil, fmt.Errorf("empty response after trimming prefix")
 	}
 
-	// Try parsing as a regular response first
-	if responses, err := decodeResponse(raw); err == nil {
-		return responses, nil
-	}
-
 	// If that fails, try parsing as a chunked response
 	reader := bufio.NewReader(strings.NewReader(raw))
 	var responses []Response
@@ -302,9 +295,6 @@ func decodeChunkedResponse(raw string) ([]Response, error) {
 		}
 		totalLength, err := strconv.Atoi(lengthStr)
 		if err != nil {
-			if debug {
-				fmt.Printf("Invalid length string: %q\n", lengthStr)
-			}
 			// Try parsing as a regular response again
 			if responses2, err := decodeResponse(raw); err == nil {
 				return responses2, nil
@@ -315,11 +305,8 @@ func decodeChunkedResponse(raw string) ([]Response, error) {
 			break
 		}
 		chunk := make([]byte, totalLength)
-		n, err := io.ReadFull(reader, chunk)
+		_, err = io.ReadFull(reader, chunk)
 		if err != nil {
-			if debug {
-				fmt.Printf("Failed to read chunk: got %d bytes, wanted %d: %v\n", n, totalLength, err)
-			}
 			// Try parsing as a regular response again
 			if responses2, err := decodeResponse(raw); err == nil {
 				return responses2, nil
@@ -337,11 +324,6 @@ func decodeChunkedResponse(raw string) ([]Response, error) {
 }
 
 func handleChunk(chunk []byte, responses *[]Response) error {
-	if debug {
-		fmt.Printf("Processing chunk (%d bytes): %q\n", len(chunk),
-			string(chunk[:min(100, len(chunk))]))
-	}
-
 	// Parse the chunk
 	var rpcBatch [][]interface{}
 	if err := json.Unmarshal(chunk, &rpcBatch); err != nil {
@@ -363,16 +345,10 @@ func handleChunk(chunk []byte, responses *[]Response) error {
 			}
 		}
 		if len(rpcData) < 7 {
-			if debug {
-				fmt.Printf("Skipping short RPC data: %v\n", rpcData)
-			}
 			continue
 		}
 		rpcType, ok := rpcData[0].(string)
 		if !ok || rpcType != "wrb.fr" {
-			if debug {
-				fmt.Printf("Skipping non-wrb.fr RPC: %v\n", rpcData[0])
-			}
 			continue
 		}
 
