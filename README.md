@@ -233,6 +233,43 @@ nlm audio-create $notebook_id "summarize in a professional tone"
 nlm audio-get $notebook_id
 ```
 
+### Automated Workflow Script 🤖
+
+For automated PDF processing, use the included workflow script:
+
+```bash
+# Run the automated workflow
+./scripts/nlm_workflow.sh document.pdf
+```
+
+**What it does:**
+- Creates a notebook named after the PDF file (if it doesn't exist)
+- Uploads the PDF as a source to the notebook
+- Generates an audio overview automatically
+- Downloads the audio file to the current directory as `document.wav`
+
+**Features:**
+- ✅ Smart duplicate detection - skips processing if notebook already exists
+- ✅ Robust upload with retry logic and verification
+- ✅ Automatic polling for audio readiness
+- ✅ Clean output with timestamped logging
+
+**Example usage:**
+```bash
+# Process a research paper
+./scripts/nlm_workflow.sh research-paper-2024.pdf
+
+# The script will:
+# 1. Create notebook "research-paper-2024"
+# 2. Upload the PDF
+# 3. Generate audio overview
+# 4. Save as "research-paper-2024.wav"
+```
+
+**Requirements:**
+- nlm CLI must be installed and authenticated (`nlm auth`)
+- Standard Unix tools: `grep`, `sed`, `head`, `mktemp`
+
 ## Advanced Usage 🔧
 
 ### Debug Mode
