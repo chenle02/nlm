@@ -133,7 +133,15 @@ First, authenticate with your Google account:
 nlm auth
 ```
 
-This will launch Chrome to authenticate with your Google account. The authentication tokens will be saved in `.env` file.
+This will launch Chrome to authenticate with your Google account. The authentication tokens will be saved in `~/.nlm/env` file.
+
+If you encounter issues during authentication, try using debug mode for additional troubleshooting information:
+
+```bash
+nlm -debug auth
+```
+
+**Note**: Authentication has been tested and confirmed working on Ubuntu Linux. The tool will automatically launch Chrome in the background to handle the Google OAuth flow.
 
 ## Usage 💻
 
@@ -250,6 +258,10 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 ## 🚀 Enhancements in This Fork
 
 - ✅ Fixed multi-chunk response decoding in `nlm list`
+- ✅ Fixed infinite recursion bug in batchexecute response parsing
+- ✅ Improved authentication timeout handling and reliability
+- ✅ Added custom parser for NotebookLM API response format changes
+- ✅ Confirmed working authentication on Ubuntu Linux with debug mode support
 
 ## License 📄
 
