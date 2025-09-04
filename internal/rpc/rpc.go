@@ -38,6 +38,13 @@ const (
 	RPCGetAudioOverview    = "VUsiyb" // GetAudioOverview
 	RPCDeleteAudioOverview = "sJDbic" // DeleteAudioOverview
 
+	// NotebookLM service - Video operations
+	// Note: Video Overview endpoints are not yet discovered/documented
+	// These are placeholders and will need to be updated with actual RPC endpoint IDs
+	RPCCreateVideoOverview = "UNKNOWN1" // CreateVideoOverview - needs to be discovered via network inspection
+	RPCGetVideoOverview    = "UNKNOWN2" // GetVideoOverview - needs to be discovered via network inspection
+	RPCDeleteVideoOverview = "UNKNOWN3" // DeleteVideoOverview - needs to be discovered via network inspection
+
 	// NotebookLM service - Generation operations
 	RPCGenerateDocumentGuides = "tr032e" // GenerateDocumentGuides
 	RPCGenerateNotebookGuide  = "VfAZjd" // GenerateNotebookGuide

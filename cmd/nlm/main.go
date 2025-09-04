@@ -59,6 +59,11 @@ func main() {
 		fmt.Fprintf(os.Stderr, "  audio-rm <id>     Delete audio overview\n")
 		fmt.Fprintf(os.Stderr, "  audio-share <id>  Share audio overview\n\n")
 
+		fmt.Fprintf(os.Stderr, "Video Commands:\n")
+		fmt.Fprintf(os.Stderr, "  video-create <id> <instructions>  Create video overview\n")
+		fmt.Fprintf(os.Stderr, "  video-get <id>    Get video overview\n")
+		fmt.Fprintf(os.Stderr, "  video-rm <id>     Delete video overview\n\n")
+
 		fmt.Fprintf(os.Stderr, "Generation Commands:\n")
 		fmt.Fprintf(os.Stderr, "  generate-guide <id>  Generate notebook guide\n")
 		fmt.Fprintf(os.Stderr, "  generate-outline <id>  Generate content outline\n")
@@ -207,6 +212,23 @@ func runCmd(client *api.Client, cmd string, args ...string) error {
 			log.Fatal("usage: nlm audio-share <notebook-id>")
 		}
 		err = shareAudioOverview(client, args[0])
+
+		// Video operations
+	case "video-create":
+		if len(args) != 2 {
+			log.Fatal("usage: nlm video-create <notebook-id> <instructions>")
+		}
+		err = createVideoOverview(client, args[0], args[1])
+	case "video-get":
+		if len(args) != 1 {
+			log.Fatal("usage: nlm video-get <notebook-id>")
+		}
+		err = getVideoOverview(client, args[0])
+	case "video-rm":
+		if len(args) != 1 {
+			log.Fatal("usage: nlm video-rm <notebook-id>")
+		}
+		err = deleteVideoOverview(client, args[0])
 
 		// Generation operations
 	case "generate-guide":
@@ -608,6 +630,94 @@ func createAudioOverview(c *api.Client, projectID string, instructions string) e
 		fmt.Printf("  Saved audio to: %s\n", filename)
 	}
 
+	return nil
+}
+
+// Video operations
+func createVideoOverview(c *api.Client, projectID string, instructions string) error {
+	fmt.Printf("Creating video overview for notebook %s...\n", projectID)
+	fmt.Printf("Instructions: %s\n", instructions)
+
+	result, err := c.CreateVideoOverview(projectID, instructions)
+	if err != nil {
+		// Check if this is due to unknown RPC endpoints
+		if strings.Contains(err.Error(), "UNKNOWN") {
+			return fmt.Errorf("❌ Video Overview functionality is not yet fully implemented.\n" +
+				"The RPC endpoints for Video Overviews need to be discovered via network inspection.\n" +
+				"Currently, Video Overviews are only available through the NotebookLM web interface.\n" +
+				"To help discover the endpoints, use the web interface and inspect network traffic.")
+		}
+		return fmt.Errorf("create video overview: %w", err)
+	}
+
+	if !result.IsReady {
+		fmt.Println("✅ Video overview creation started. Use 'nlm video-get' to check status.")
+		return nil
+	}
+
+	// If the result is immediately ready (unlikely but possible)
+	fmt.Printf("✅ Video Overview created:\n")
+	fmt.Printf("  Title: %s\n", result.Title)
+	fmt.Printf("  ID: %s\n", result.VideoID)
+
+	// Display video URL or save video data if available
+	if result.VideoData != "" {
+		fmt.Printf("  Video URL/Data: %s\n", result.VideoData)
+	}
+
+	return nil
+}
+
+func getVideoOverview(c *api.Client, projectID string) error {
+	fmt.Fprintf(os.Stderr, "Fetching video overview...\n")
+
+	result, err := c.GetVideoOverview(projectID)
+	if err != nil {
+		// Check if this is due to unknown RPC endpoints
+		if strings.Contains(err.Error(), "UNKNOWN") {
+			return fmt.Errorf("❌ Video Overview functionality is not yet fully implemented.\n" +
+				"The RPC endpoints for Video Overviews need to be discovered via network inspection.\n" +
+				"Currently, Video Overviews are only available through the NotebookLM web interface.")
+		}
+		return fmt.Errorf("get video overview: %w", err)
+	}
+
+	if !result.IsReady {
+		fmt.Println("Video overview is not ready yet. Try again in a few moments.")
+		return nil
+	}
+
+	fmt.Printf("Video Overview:\n")
+	fmt.Printf("  Title: %s\n", result.Title)
+	fmt.Printf("  ID: %s\n", result.VideoID)
+	fmt.Printf("  Ready: %v\n", result.IsReady)
+
+	// Display video URL or data
+	if result.VideoData != "" {
+		fmt.Printf("  Video URL/Data: %s\n", result.VideoData)
+	}
+
+	return nil
+}
+
+func deleteVideoOverview(c *api.Client, notebookID string) error {
+	fmt.Printf("Are you sure you want to delete the video overview? [y/N] ")
+	var response string
+	fmt.Scanln(&response)
+	if !strings.HasPrefix(strings.ToLower(response), "y") {
+		return fmt.Errorf("operation cancelled")
+	}
+
+	if err := c.DeleteVideoOverview(notebookID); err != nil {
+		// Check if this is due to unknown RPC endpoints
+		if strings.Contains(err.Error(), "UNKNOWN") {
+			return fmt.Errorf("❌ Video Overview functionality is not yet fully implemented.\n" +
+				"The RPC endpoints for Video Overviews need to be discovered via network inspection.\n" +
+				"Currently, Video Overviews are only available through the NotebookLM web interface.")
+		}
+		return fmt.Errorf("delete video overview: %w", err)
+	}
+	fmt.Printf("✅ Deleted video overview\n")
 	return nil
 }
 

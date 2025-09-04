@@ -867,6 +867,179 @@ func (c *Client) DeleteAudioOverview(projectID string) error {
 	return err
 }
 
+// Video operations
+
+func (c *Client) CreateVideoOverview(projectID string, instructions string) (*VideoOverviewResult, error) {
+	if projectID == "" {
+		return nil, fmt.Errorf("project ID required")
+	}
+	if instructions == "" {
+		return nil, fmt.Errorf("instructions required")
+	}
+
+	// Trigger video generation: similar to audio but for video
+	// Invoke CreateVideoOverview RPC: args are [notebookID, 0, [instructions]]
+	resp, err := c.rpc.Do(rpc.Call{
+		ID: rpc.RPCCreateVideoOverview,
+		Args: []interface{}{
+			projectID,
+			0,
+			[]interface{}{instructions},
+		},
+		NotebookID: projectID,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("create video overview: %w", err)
+	}
+
+	var data []interface{}
+	if err := json.Unmarshal(resp, &data); err != nil {
+		return nil, fmt.Errorf("parse response JSON: %w", err)
+	}
+
+	result := &VideoOverviewResult{
+		ProjectID: projectID,
+	}
+
+	// Handle empty or nil response
+	if len(data) == 0 {
+		return result, nil
+	}
+
+	// Check for server-side errors in RPC envelope: error details in data[5]
+	if len(data) > 5 {
+		if errInfo, ok := data[5].([]interface{}); ok && len(errInfo) > 0 {
+			if code, ok2 := errInfo[0].(float64); ok2 && code != 0 {
+				// Code 8 indicates daily video limit reached (similar to audio)
+				if int(code) == 8 {
+					return nil, fmt.Errorf("You have reached your daily Video Overview limit. Please try again later.")
+				}
+				return nil, fmt.Errorf("video creation failed (code=%v), detail=%v", code, errInfo)
+			}
+		}
+	}
+
+	// Parse the wrb.fr response format for video data (similar to audio)
+	// Format: [null,null,[3,"<video-data>","<id>","<title>",null,true],null,[false]]
+	if len(data) > 2 {
+		videoData, ok := data[2].([]interface{})
+		if !ok {
+			return nil, fmt.Errorf("invalid video data format")
+		}
+		if len(videoData) < 4 {
+			// Creation might be in progress, return result without error
+			return result, nil
+		}
+
+		// Extract video data (index 1) - might be URL or base64 depending on format
+		if videoContent, ok := videoData[1].(string); ok {
+			result.VideoData = videoContent
+		}
+
+		// Extract ID (index 2)
+		if id, ok := videoData[2].(string); ok {
+			result.VideoID = id
+		}
+
+		// Extract title (index 3)
+		if title, ok := videoData[3].(string); ok {
+			result.Title = title
+		}
+
+		// Extract ready status (index 5)
+		if len(videoData) > 5 {
+			if ready, ok := videoData[5].(bool); ok {
+				result.IsReady = ready
+			}
+		}
+	}
+
+	return result, nil
+}
+
+func (c *Client) GetVideoOverview(projectID string) (*VideoOverviewResult, error) {
+	resp, err := c.rpc.Do(rpc.Call{
+		ID: rpc.RPCGetVideoOverview,
+		Args: []interface{}{
+			projectID,
+			1,
+		},
+		NotebookID: projectID,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("get video overview: %w", err)
+	}
+
+	var data []interface{}
+	if err := json.Unmarshal(resp, &data); err != nil {
+		return nil, fmt.Errorf("parse response JSON: %w", err)
+	}
+
+	result := &VideoOverviewResult{
+		ProjectID: projectID,
+	}
+
+	// Handle empty or nil response
+	if len(data) == 0 {
+		return result, nil
+	}
+
+	// Parse the wrb.fr response format for video data
+	if len(data) > 2 {
+		videoData, ok := data[2].([]interface{})
+		if !ok {
+			// Data not as expected; video not ready
+			return result, nil
+		}
+		if len(videoData) < 4 {
+			// Video not ready yet
+			return result, nil
+		}
+
+		// Extract video data (index 1)
+		if videoContent, ok := videoData[1].(string); ok {
+			result.VideoData = videoContent
+		}
+
+		// Extract ID (index 2)
+		if id, ok := videoData[2].(string); ok {
+			result.VideoID = id
+		}
+
+		// Extract title (index 3)
+		if title, ok := videoData[3].(string); ok {
+			result.Title = title
+		}
+
+		// Extract ready status (index 5)
+		if len(videoData) > 5 {
+			if ready, ok := videoData[5].(bool); ok {
+				result.IsReady = ready
+			}
+		}
+	}
+
+	return result, nil
+}
+
+// VideoOverviewResult represents a video overview response
+type VideoOverviewResult struct {
+	ProjectID string
+	VideoID   string
+	Title     string
+	VideoData string // Video URL or base64 encoded video data
+	IsReady   bool
+}
+
+func (c *Client) DeleteVideoOverview(projectID string) error {
+	_, err := c.rpc.Do(rpc.Call{
+		ID:         rpc.RPCDeleteVideoOverview,
+		Args:       []interface{}{projectID},
+		NotebookID: projectID,
+	})
+	return err
+}
+
 // Generation operations
 
 func (c *Client) GenerateDocumentGuides(projectID string) (*pb.GenerateDocumentGuidesResponse, error) {

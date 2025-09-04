@@ -62,6 +62,11 @@ Audio Commands:
   audio-rm <id>     Delete audio overview
   audio-share <id>  Share audio overview
 
+Video Commands:
+  video-create <id> <instructions>  Create video overview
+  video-get <id>    Get video overview
+  video-rm <id>     Delete video overview
+
 Generation Commands:
   generate-guide <id>  Generate notebook guide
   generate-outline <id>  Generate content outline
@@ -215,6 +220,21 @@ nlm audio-share <notebook-id>
 nlm audio-share <notebook-id> --public
 ```
 
+### Video Overview
+
+```bash
+# Create a video overview
+nlm video-create <notebook-id> "create engaging visual explanation"
+
+# Get video overview status/content
+nlm video-get <notebook-id>
+
+# Delete video overview
+nlm video-rm <notebook-id>
+```
+
+**Note**: Video overview functionality requires discovery of the actual NotebookLM RPC endpoints. Currently, the video commands are implemented but will show an informative error message until the correct RPC endpoint IDs are discovered through network inspection of the NotebookLM web interface.
+
 ## Examples 📋
 
 Create a notebook and add some content:
@@ -229,8 +249,14 @@ nlm add $notebook_id research-data.pdf
 # Create an audio overview
 nlm audio-create $notebook_id "summarize in a professional tone"
 
+# Create a video overview
+nlm video-create $notebook_id "create visual presentation with key insights"
+
 # Check the audio overview
 nlm audio-get $notebook_id
+
+# Check the video overview
+nlm video-get $notebook_id
 ```
 
 ### Automated Workflow Script 🤖
@@ -299,6 +325,9 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 - ✅ Improved authentication timeout handling and reliability
 - ✅ Added custom parser for NotebookLM API response format changes
 - ✅ Confirmed working authentication on Ubuntu Linux with debug mode support
+- ✅ Added Video Overview functionality framework (`video-create`, `video-get`, `video-rm`)
+  - Framework ready for easy endpoint discovery and integration
+  - Informative error messages explaining current limitations
 
 ## License 📄
 
