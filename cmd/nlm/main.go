@@ -333,8 +333,13 @@ func listSources(c *api.Client, notebookID string) error {
 			lastUpdated = src.Metadata.LastModifiedTime.AsTime().Format(time.RFC3339)
 		}
 
+		sourceID := ""
+		if src.SourceId != nil {
+			sourceID = src.SourceId.GetSourceId()
+		}
+
 		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n",
-			src.SourceId.GetSourceId(),
+			sourceID,
 			strings.TrimSpace(src.Title),
 			src.Metadata.GetSourceType(),
 			status,

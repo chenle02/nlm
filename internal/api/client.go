@@ -164,11 +164,104 @@ func (c *Client) GetProject(projectID string) (*Notebook, error) {
 		return nil, fmt.Errorf("get project: %w", err)
 	}
 
-	var project pb.Project
-	if err := beprotojson.Unmarshal(resp, &project); err != nil {
+	// Parse the response manually since the format doesn't match the protobuf exactly
+	var rawResponse []interface{}
+	if err := json.Unmarshal(resp, &rawResponse); err != nil {
 		return nil, fmt.Errorf("parse response: %w", err)
 	}
-	return &project, nil
+
+	if len(rawResponse) == 0 {
+		return nil, fmt.Errorf("empty response")
+	}
+
+	// The project data should be in the first element
+	projectArray, ok := rawResponse[0].([]interface{})
+	if !ok || len(projectArray) < 3 {
+		return nil, fmt.Errorf("invalid project response format")
+	}
+
+	// Extract basic project information
+	// Format: [title, sources_data, project_id, emoji, ...]
+	title, _ := projectArray[0].(string)
+	projectIDResp, _ := projectArray[2].(string)
+	emoji, _ := projectArray[3].(string)
+
+	// Parse sources from projectArray[1]
+	var sources []*pb.Source
+	if sourcesData, ok := projectArray[1].([]interface{}); ok {
+		for _, sourceData := range sourcesData {
+			if sourceArray, ok := sourceData.([]interface{}); ok && len(sourceArray) >= 2 {
+				// Extract source information
+				// Format: [source_id_array, filename, metadata, ...]
+				var sourceID string
+				if sourceIDArray, ok := sourceArray[0].([]interface{}); ok && len(sourceIDArray) > 0 {
+					sourceID, _ = sourceIDArray[0].(string)
+				}
+
+				filename, _ := sourceArray[1].(string)
+
+				// Create source metadata if available
+				var metadata *pb.SourceMetadata
+				var settings *pb.SourceSettings
+				if len(sourceArray) > 2 {
+					if metaArray, ok := sourceArray[2].([]interface{}); ok && len(metaArray) > 2 {
+						// Extract last modified time if available
+						var lastModified *timestamppb.Timestamp
+						if len(metaArray) > 2 {
+							if timeArray, ok := metaArray[2].([]interface{}); ok && len(timeArray) >= 2 {
+								if seconds, ok := timeArray[0].(float64); ok {
+									if nanos, ok := timeArray[1].(float64); ok {
+										lastModified = &timestamppb.Timestamp{
+											Seconds: int64(seconds),
+											Nanos:   int32(nanos),
+										}
+									}
+								}
+							}
+						}
+
+						// Extract source type if available
+						var sourceType pb.SourceType
+						if len(metaArray) > 4 {
+							if typeVal, ok := metaArray[4].(float64); ok {
+								sourceType = pb.SourceType(int32(typeVal))
+							}
+						}
+
+						metadata = &pb.SourceMetadata{
+							LastModifiedTime: lastModified,
+							SourceType:       sourceType,
+						}
+
+						settings = &pb.SourceSettings{
+							Status: pb.SourceSettings_SOURCE_STATUS_ENABLED, // default to enabled
+						}
+					}
+				}
+
+				// Create the source
+				source := &pb.Source{
+					SourceId: &pb.SourceId{
+						SourceId: sourceID,
+					},
+					Title:    filename,
+					Metadata: metadata,
+					Settings: settings,
+				}
+
+				sources = append(sources, source)
+			}
+		}
+	}
+
+	project := &pb.Project{
+		ProjectId: projectIDResp,
+		Title:     title,
+		Emoji:     emoji,
+		Sources:   sources,
+	}
+
+	return project, nil
 }
 
 func (c *Client) DeleteProjects(projectIDs []string) error {
