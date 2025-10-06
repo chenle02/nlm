@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strconv"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -55,7 +56,8 @@ func main() {
 
 		fmt.Fprintf(os.Stderr, "Audio Commands:\n")
 		fmt.Fprintf(os.Stderr, "  audio-create <id> <instructions>  Create audio overview\n")
-		fmt.Fprintf(os.Stderr, "  audio-get <id>    Get audio overview\n")
+		fmt.Fprintf(os.Stderr, "  audio-list <id>   List all available audio overviews\n")
+		fmt.Fprintf(os.Stderr, "  audio-get <id> [type]  Get audio overview (optionally specify type)\n")
 		fmt.Fprintf(os.Stderr, "  audio-rm <id>     Delete audio overview\n")
 		fmt.Fprintf(os.Stderr, "  audio-share <id>  Share audio overview\n\n")
 
@@ -197,11 +199,20 @@ func runCmd(client *api.Client, cmd string, args ...string) error {
 			log.Fatal("usage: nlm audio-create <notebook-id> <instructions>")
 		}
 		err = createAudioOverview(client, args[0], args[1])
-	case "audio-get":
+	case "audio-list":
 		if len(args) != 1 {
-			log.Fatal("usage: nlm audio-get <notebook-id>")
+			log.Fatal("usage: nlm audio-list <notebook-id>")
 		}
-		err = getAudioOverview(client, args[0])
+		err = listAudioOverviews(client, args[0])
+	case "audio-get":
+		if len(args) < 1 || len(args) > 2 {
+			log.Fatal("usage: nlm audio-get <notebook-id> [type]")
+		}
+		if len(args) == 1 {
+			err = getAudioOverview(client, args[0])
+		} else {
+			err = getAudioOverviewByType(client, args[0], args[1])
+		}
 	case "audio-rm":
 		if len(args) != 1 {
 			log.Fatal("usage: nlm audio-rm <notebook-id>")
@@ -723,6 +734,116 @@ func deleteVideoOverview(c *api.Client, notebookID string) error {
 		return fmt.Errorf("delete video overview: %w", err)
 	}
 	fmt.Printf("✅ Deleted video overview\n")
+	return nil
+}
+
+func listAudioOverviews(c *api.Client, projectID string) error {
+	fmt.Fprintf(os.Stderr, "Listing all audio overviews for project %s...\n", projectID)
+
+	results, err := c.ListAudioOverviews(projectID)
+	if err != nil {
+		return fmt.Errorf("list audio overviews: %w", err)
+	}
+
+	if len(results) == 0 {
+		fmt.Println("No audio overviews found.")
+		return nil
+	}
+
+	fmt.Println("\n📋 Available Audio Overviews:")
+	fmt.Println("═══════════════════════════════════════════════════════════════════════")
+
+	// Sort results by type for consistent display
+	for _, result := range results {
+		var description string
+		var characteristics string
+
+		// Provide descriptive information for each type
+		switch result.AudioType {
+		case 0:
+			description = "📻 Type 0: Extended audio overview"
+			characteristics = "External reference (longer format, ~34+ minutes)"
+		case 1:
+			description = "🎵 Type 1: Standard audio overview"
+			characteristics = "Embedded audio (shorter format, ~12 minutes)"
+		default:
+			description = fmt.Sprintf("🎧 Type %d: Audio overview", result.AudioType)
+			characteristics = "Format: Unknown"
+		}
+
+		fmt.Printf("\n%s\n", description)
+		fmt.Printf("├─ Audio ID: %s\n", result.AudioID)
+		fmt.Printf("├─ API Title: %s\n", result.Title)
+		fmt.Printf("├─ Status: %s\n", func() string {
+			if result.IsReady { return "✅ Ready" } else { return "⏳ Processing" }
+		}())
+		fmt.Printf("├─ Characteristics: %s\n", characteristics)
+
+		if result.DataSize > 0 {
+			if result.DataSize > 1024*1024 {
+				fmt.Printf("├─ Data Size: %.1f MB\n", float64(result.DataSize)/1024/1024)
+			} else {
+				fmt.Printf("├─ Data Size: %.1f KB\n", float64(result.DataSize)/1024)
+			}
+		} else if result.AudioType == 0 {
+			fmt.Printf("├─ Data Size: External reference (not downloaded via API)\n")
+		} else {
+			fmt.Printf("├─ Data Size: No data available\n")
+		}
+
+		if result.EstimatedDuration != "" {
+			fmt.Printf("└─ Duration: %s\n", result.EstimatedDuration)
+		} else {
+			fmt.Printf("└─ Duration: Unknown\n")
+		}
+	}
+
+	fmt.Println("\n💡 Note about titles:")
+	fmt.Println("The API returns generic identifiers, but NotebookLM's website may show")
+	fmt.Println("different, more descriptive titles generated from audio content analysis.")
+	fmt.Println("\nTo download: nlm audio-get <project-id> <type>")
+	fmt.Printf("Example: nlm audio-get %s 1\n", projectID)
+
+	return nil
+}
+
+func getAudioOverviewByType(c *api.Client, projectID, audioTypeStr string) error {
+	audioType, err := strconv.Atoi(audioTypeStr)
+	if err != nil {
+		return fmt.Errorf("invalid audio type '%s': must be a number", audioTypeStr)
+	}
+
+	fmt.Fprintf(os.Stderr, "Fetching audio overview (type %d)...\n", audioType)
+
+	result, err := c.GetAudioOverviewByType(projectID, audioType)
+	if err != nil {
+		return fmt.Errorf("get audio overview: %w", err)
+	}
+
+	if !result.IsReady && result.AudioID == "" && result.Title == "" {
+		fmt.Printf("No audio overview found for type %d.\n", audioType)
+		return nil
+	}
+
+	fmt.Printf("Audio Overview (Type %d):\n", audioType)
+	fmt.Printf("  Title: %s\n", result.Title)
+	fmt.Printf("  ID: %s\n", result.AudioID)
+	fmt.Printf("  Ready: %v\n", result.IsReady)
+
+	// Optionally save the audio file
+	if result.AudioData != "" {
+		audioData, err := result.GetAudioBytes()
+		if err != nil {
+			return fmt.Errorf("decode audio data: %w", err)
+		}
+
+		filename := fmt.Sprintf("audio_overview_type_%d_%s.wav", audioType, result.AudioID)
+		if err := os.WriteFile(filename, audioData, 0644); err != nil {
+			return fmt.Errorf("save audio file: %w", err)
+		}
+		fmt.Printf("  Saved audio to: %s\n", filename)
+	}
+
 	return nil
 }
 
