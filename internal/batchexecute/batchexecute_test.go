@@ -79,14 +79,20 @@ func TestDecodeResponse(t *testing.T) {
 [["di",125],["af.httprm",124,"6343297907846200142",27]]`,
 			chunked: true,
 			validate: func(t *testing.T, resp []Response) {
-				if len(resp) != 1 {
-					t.Errorf("Expected 1 response, got %d", len(resp))
+				// We now correctly parse both wrb.fr and error chunks
+				if len(resp) != 2 {
+					t.Errorf("Expected 2 responses (1 data + 1 error), got %d", len(resp))
 					return
 				}
 
 				// Verify the main response
 				if resp[0].ID != "VUsiyb" {
 					t.Errorf("Expected ID VUsiyb, got %s", resp[0].ID)
+				}
+
+				// Verify error response is captured
+				if resp[1].Error != "237" {
+					t.Errorf("Expected error code 237, got %q", resp[1].Error)
 				}
 			},
 			err: nil,
@@ -132,7 +138,7 @@ func TestDecodeResponse(t *testing.T) {
 				{
 					ID:    "izAoDd",
 					Index: 0,
-					Data:  json.RawMessage(`["wrb.fr","izAoDd",null,null,null,[3],"generic"]`),
+					Data:  json.RawMessage(`null`),
 				},
 			},
 			err: nil,
@@ -180,7 +186,6 @@ func TestDecodeResponse(t *testing.T) {
 			)
 
 			if tc.chunked {
-				t.Skip("Chunked responses are in progress (please help!)")
 				actual, err = decodeChunkedResponse(")]}'\n" + tc.input)
 			} else {
 				actual, err = decodeResponse(tc.input)

@@ -2,6 +2,7 @@ package batchexecute
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -185,12 +186,14 @@ func (c *Client) Execute(rpcs []RPC) (*Response, error) {
 		return nil, fmt.Errorf("no valid responses found")
 	}
 
+	// Check for error responses, but ignore error codes 140-141 which indicate "no results"
 	for _, resp := range responses {
-		if resp.Error != "" {
+		if resp.Error != "" && resp.Error != "140" && resp.Error != "141" {
 			return &resp, nil
 		}
 	}
 
+	// Return the first non-error response (or first response if all are errors)
 	return &responses[0], nil
 }
 
@@ -242,12 +245,8 @@ func decodeResponse(raw string) ([]Response, error) {
 		case string:
 			resp.Data = json.RawMessage(v)
 		case nil:
-			// explicit null or empty payload: capture full RPC envelope for error inspection
-			if full, err2 := json.Marshal(rpcData); err2 == nil {
-				resp.Data = json.RawMessage(full)
-			} else {
-				resp.Data = json.RawMessage("null")
-			}
+			// Null data means empty/no results - return null as valid JSON
+			resp.Data = json.RawMessage("null")
 		default:
 			// marshal other types (e.g., numbers, objects)
 			if rawData, err := json.Marshal(v); err == nil {
@@ -305,13 +304,25 @@ func decodeChunkedResponse(raw string) ([]Response, error) {
 			break
 		}
 		chunk := make([]byte, totalLength)
-		_, err = io.ReadFull(reader, chunk)
-		if err != nil {
-			// Try parsing as a regular response again
-			if responses2, err := decodeResponse(raw); err == nil {
-				return responses2, nil
-			}
+		n, err := io.ReadFull(reader, chunk)
+		if err != nil && err != io.ErrUnexpectedEOF {
 			return nil, fmt.Errorf("read chunk: %w", err)
+		}
+		if err == io.ErrUnexpectedEOF {
+			// Google's chunk length was wrong, use what we got
+			chunk = chunk[:n]
+		}
+		// Google's chunk lengths are sometimes off by 1-2 bytes, including partial length markers.
+		// Find the actual end of the JSON by looking for the last ] followed by junk.
+		lastBracket := bytes.LastIndexByte(chunk, ']')
+		if lastBracket > 0 && lastBracket < len(chunk)-1 {
+			// There's extra data after the JSON. We need to "unread" it by creating a new reader
+			// that includes the extra bytes plus what's left in the original reader.
+			extraBytes := chunk[lastBracket+1:]
+			// Create a multi-reader that first reads the extra bytes, then continues with the original reader
+			reader = bufio.NewReader(io.MultiReader(bytes.NewReader(extraBytes), reader))
+			// Trim the chunk to just the JSON
+			chunk = chunk[:lastBracket+1]
 		}
 		if err := handleChunk(chunk, &responses); err != nil {
 			return nil, err
@@ -362,14 +373,12 @@ func handleChunk(chunk []byte, responses *[]Response) error {
 		case string:
 			resp.Data = json.RawMessage(v)
 		case nil:
-			// No direct data; fall back to full rpcData envelope
-			if full, err := json.Marshal(rpcData); err == nil {
-				resp.Data = json.RawMessage(full)
-			}
+			// Null data means empty/no results - return null as valid JSON
+			resp.Data = json.RawMessage("null")
 		default:
-			// Unexpected type (array or object), marshal entire rpcData
-			if full, err := json.Marshal(rpcData); err == nil {
-				resp.Data = json.RawMessage(full)
+			// Unexpected type (array or object), marshal it directly
+			if rawData, err := json.Marshal(v); err == nil {
+				resp.Data = json.RawMessage(rawData)
 			}
 		}
 

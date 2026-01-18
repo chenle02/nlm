@@ -58,6 +58,11 @@ func (c *Client) ListRecentlyViewedProjects() ([]*pb.RecentlyViewedProject, erro
 	}
 
 	// Parse the response manually since the format doesn't match the protobuf
+	// First check if the response is null (meaning no projects)
+	if string(data) == "null" || len(data) == 0 {
+		return []*pb.RecentlyViewedProject{}, nil
+	}
+
 	var rawResponse []interface{}
 	if err := json.Unmarshal(data, &rawResponse); err != nil {
 		return nil, fmt.Errorf("parse response: %w", err)
