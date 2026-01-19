@@ -36,34 +36,38 @@ check_dependencies() {
   done
 }
 
+get_notebook_id() {
+  local title="$1"
+  local notebooks
+  notebooks=$(nlm list 2>/dev/null | tail -n +2)
+
+  while IFS= read -r line; do
+    local id normalized_title
+    id=$(echo "$line" | grep -Eo '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}' || true)
+    [[ -z "$id" ]] && continue
+
+    normalized_title=$(echo "$line" \
+      | sed -E 's/^[[:space:]]*[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}[[:space:]]+//' \
+      | sed -E 's/[[:space:]]+[0-9]{4}-[0-9]{2}-[0-9]{2}T[^[:space:]]+$//' \
+      | sed -E 's/^[[:space:]]*[^[:alnum:]]+[[:space:]]*//' \
+      | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//')
+
+    if [[ "$normalized_title" == "$title" ]]; then
+      echo "$id"
+      return 0
+    fi
+  done <<< "$notebooks"
+
+  return 1
+}
+
 check_notebook_exists() {
   local title="$1"
   log "Checking if notebook '$title' exists..."
-  
-  # Get notebook list and clean up the output
-  local notebooks
-  notebooks=$(nlm list 2>/dev/null | tail -n +3 | sed -E 's/[[:space:]]*$//' | sed -E 's/^[[:space:]]*//')
-  
-  # Debug output
-  log "Available notebooks:"
-  echo "$notebooks" | while read -r line; do
-    log "  '$line'"
-  done
-  
-  # Check for exact title match (ignoring leading/trailing spaces)
-  # if echo "$notebooks" | grep -q "$title"; then
-  # Ignore all leading emojis and spaces when searching for the notebook title
-  if echo "$notebooks" | sed 's/^[[:space:]]*[^[:alnum:]]*//' | grep -q "$title"; then
-    log "Found exact match for notebook '$title'"
+  if get_notebook_id "$title" >/dev/null 2>&1; then
+    log "Found notebook '$title'"
     return 0
   fi
-  
-  # Check for title as a word boundary (to avoid partial matches)
-  if echo "$notebooks" | grep -q "\b$title\b"; then
-    log "Found notebook containing '$title' as a complete word"
-    return 0
-  fi
-  
   log "No matching notebook found for '$title'"
   return 1
 }
@@ -71,15 +75,13 @@ check_notebook_exists() {
 create_notebook() {
   local title="$1" out id
   log "Creating notebook '$title'..."
-  # Create notebook and capture output to extract ID
   out=$(nlm create "$title" 2>&1) || {
     log "Failed to create notebook: $out"
     exit 1
   }
-  # Extract notebook ID (UUID) allowing prefixes and uppercase hex
-  id=$(echo "$out" | grep -Eo '[0-9A-Fa-f-]{36}' | head -1)
+  id=$(echo "$out" | grep -Eo '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}' | head -1)
   if [[ -z "$id" ]]; then
-    log "Failed to parse notebook ID from create output: $out"
+    log "Failed to parse notebook ID from create output"
     exit 1
   fi
   echo "$id"
@@ -89,13 +91,11 @@ upload_pdf() {
   local id="$1" pdf="$2"
   log "Uploading '$pdf' to notebook id '$id'..."
   
-  # First verify the notebook exists
   if ! nlm sources "$id" &>/dev/null; then
     log "Error: Notebook ID '$id' not found or inaccessible"
     exit 1
   fi
   
-  # Try to upload with timeout
   local max_attempts=3
   local attempt=1
   local success=false
@@ -103,12 +103,10 @@ upload_pdf() {
   while [[ $attempt -le $max_attempts ]]; do
     log "Upload attempt $attempt of $max_attempts..."
     
-    # Run nlm add and capture both stdout and stderr
     local out
     out=$(nlm add "$id" "$pdf" 2>&1)
     local exit_code=$?
     
-    # Check for various success indicators
     if [[ $exit_code -eq 0 ]] || \
        echo "$out" | grep -q "Adding " || \
        echo "$out" | grep -q "successfully added" || \
@@ -128,17 +126,14 @@ upload_pdf() {
     exit 1
   fi
   
-  # Verify the upload by checking sources
   log "Verifying upload..."
   if ! nlm sources "$id" | grep -q "$(basename "$pdf")"; then
     log "Warning: PDF not found in notebook sources after upload"
-    # Don't exit here as the upload might still be processing
   fi
 }
 
 generate_and_download_audio() {
   local id="$1" output="$2" interval=10 tmp
-  # If output file already exists, skip generation
   if [[ -s "$output" ]]; then
     log "Audio file '$output' already exists; skipping generation"
     return 0
@@ -149,16 +144,11 @@ generate_and_download_audio() {
     exit 1
   fi
   log "Polling for audio readiness..."
-  # Poll for readiness by parsing output of nlm audio-get
   while true; do
-    # Invoke audio-get and capture its output
     local out wavfile
     out=$(nlm audio-get "$id" 2>&1) || true
-    # Detect when audio has been saved
     if echo "$out" | grep -q "Saved audio to:"; then
-      # Extract the generated file path
       wavfile=$(echo "$out" | sed -n 's/.*Saved audio to:[[:space:]]*\(.*\)/\1/p')
-      # Verify the file exists before moving
       if [[ -n "$wavfile" && -f "$wavfile" ]]; then
         log "Audio ready; saving to '$output'"
         mv "$wavfile" "$output"
@@ -182,18 +172,24 @@ main() {
 
   local base
   base=$(basename "${pdf%.*}")
+  local outfile="${PWD}/${base}.wav"
 
   if check_notebook_exists "$base"; then
-    log "Notebook '$base' already exists. Exiting."
+    if [[ -s "$outfile" ]]; then
+      log "Notebook and audio file already exist. Exiting."
+      exit 0
+    fi
+    log "Notebook exists but audio file missing. Downloading audio..."
+    local nb_id
+    nb_id=$(get_notebook_id "$base")
+    generate_and_download_audio "$nb_id" "$outfile"
+    log "Workflow complete. Audio saved to '$outfile'"
     exit 0
   fi
 
-  # Create notebook and get its ID
   nb_id=$(create_notebook "$base")
   upload_pdf "$nb_id" "$pdf"
 
-  # Generate and download audio overview (.wav) into the current working directory
-  local outfile="${PWD}/${base}.wav"
   generate_and_download_audio "$nb_id" "$outfile"
 
   log "Workflow complete. Audio saved to '$outfile'"
