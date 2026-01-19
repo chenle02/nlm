@@ -162,6 +162,40 @@ If automatic browser authentication fails or captures incomplete cookies, use th
 
 This extracts the proper authenticated cookies and auth token from your browser session.
 
+### Refreshing Authentication
+
+The `at=` token in the authentication expires after a few hours. When `nlm list` stops working, use the helper script to refresh:
+
+**Interactive mode (paste + Ctrl-D):**
+```bash
+./scripts/nlm-refresh-auth
+# Paste cURL from DevTools, then press Ctrl-D
+```
+
+**Pipe directly:**
+```bash
+echo '<curl command>' | ./scripts/nlm-refresh-auth
+```
+
+**Add to PATH for convenience:**
+```bash
+ln -sf /path/to/nlm/scripts/nlm-refresh-auth ~/bin/nlm-refresh-auth
+# Then run from anywhere:
+nlm-refresh-auth
+```
+
+The script extracts auth credentials, writes `~/.nlm/env`, and verifies with a test `nlm list`.
+
+### Sharing Authentication Across Machines
+
+The `~/.nlm/env` file can be copied to other machines:
+
+```bash
+scp ~/.nlm/env user@other-machine:~/.nlm/env
+```
+
+**Note**: This file contains live Google session cookies — treat it like a password. When auth expires, refresh on any machine and copy the updated file.
+
 **Note**: Authentication has been tested and confirmed working on Ubuntu Linux. The tool will automatically launch Chrome in the background to handle the Google OAuth flow.
 
 ## Usage 💻

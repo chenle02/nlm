@@ -1,0 +1,40 @@
+#!/bin/bash
+# Refresh nlm authentication from a cURL command
+# Usage: 
+#   1. Copy a batchexecute request as cURL from Chrome DevTools
+#   2. Run: nlm-refresh-auth
+#   3. Paste the cURL and press Ctrl-D
+#
+# Or pipe directly: echo '<curl ...>' | nlm-refresh-auth
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+NLM_BIN="${SCRIPT_DIR}/../nlm"
+
+if [[ ! -x "$NLM_BIN" ]]; then
+    NLM_BIN="$(command -v nlm 2>/dev/null || true)"
+fi
+
+if [[ -z "$NLM_BIN" || ! -x "$NLM_BIN" ]]; then
+    echo "Error: nlm binary not found" >&2
+    exit 1
+fi
+
+if [[ -t 0 ]]; then
+    echo "Paste cURL from Chrome DevTools (batchexecute request), then press Ctrl-D:"
+    echo "---"
+fi
+
+cat | "$NLM_BIN" auth
+
+echo ""
+echo "Testing auth..."
+if "$NLM_BIN" list 2>/dev/null | head -3; then
+    echo "---"
+    echo "Auth refreshed successfully!"
+else
+    echo "---"
+    echo "Auth may have failed. Try again with a fresh cURL." >&2
+    exit 1
+fi
