@@ -146,6 +146,22 @@ If you encounter issues during authentication, try using debug mode for addition
 nlm -debug auth
 ```
 
+### Manual Authentication (Recommended)
+
+If automatic browser authentication fails or captures incomplete cookies, use the manual cURL method:
+
+1. Open https://notebooklm.google.com in Chrome (make sure you're logged in)
+2. Open DevTools (F12) → Network tab
+3. Refresh the page
+4. Find any `batchexecute` request
+5. Right-click → **Copy as cURL**
+6. Run:
+   ```bash
+   echo '<paste curl command here>' | ./nlm auth
+   ```
+
+This extracts the proper authenticated cookies and auth token from your browser session.
+
 **Note**: Authentication has been tested and confirmed working on Ubuntu Linux. The tool will automatically launch Chrome in the background to handle the Google OAuth flow.
 
 ## Usage 💻
@@ -320,6 +336,14 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 
 ## 🚀 Enhancements in This Fork
 
+### v0.2.0 (January 2026)
+- ✅ **Fixed authentication error detection** - Now properly detects Google API error code 16 (UNAUTHENTICATED) and triggers re-auth
+- ✅ **Updated API parameters** - Synced `bl` (build label) and `f.sid` parameters with current NotebookLM API
+- ✅ **Improved auth token parsing** - Fixed URL-encoded token handling from cURL commands
+- ✅ **Added cookie validation** - Warns when captured cookies are incomplete (missing SID, SSID, etc.)
+- ✅ **Manual cURL auth method** - Added reliable fallback authentication via browser DevTools
+
+### v0.1.0 (Previous)
 - ✅ Fixed multi-chunk response decoding in `nlm list`
 - ✅ Fixed infinite recursion bug in batchexecute response parsing
 - ✅ Improved authentication timeout handling and reliability

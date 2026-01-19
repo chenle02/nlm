@@ -5,6 +5,7 @@ import (
 	"bufio"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -58,38 +59,42 @@ func readFromStdin() (string, error) {
 }
 
 func detectAuthInfo(cmd string) (string, string, error) {
-	// Extract cookies
-	cookieRe := regexp.MustCompile(`-H ['"]cookie: ([^'"]+)['"]`)
+	cookieRe := regexp.MustCompile(`(?i)-(?:H\s+['"]cookie:\s*|b\s+['"]?)([^'"]+)['"]?`)
 	cookieMatch := cookieRe.FindStringSubmatch(cmd)
 	if len(cookieMatch) < 2 {
 		return "", "", fmt.Errorf("no cookies found")
 	}
 	cookies := cookieMatch[1]
 
-	// Extract auth token
-	atRe := regexp.MustCompile(`at=([^&\s]+)`)
+	atRe := regexp.MustCompile(`at=([^&\s']+)`)
 	atMatch := atRe.FindStringSubmatch(cmd)
 	if len(atMatch) < 2 {
 		return "", "", fmt.Errorf("no auth token found")
 	}
 	authToken := atMatch[1]
+	if decoded, err := url.QueryUnescape(authToken); err == nil {
+		authToken = decoded
+	}
 	persistAuthToDisk(cookies, authToken, "")
 	return authToken, cookies, nil
 }
 
 func persistAuthToDisk(cookies, authToken, profileName string) (string, string, error) {
+	if warning := validateCookies(cookies); warning != "" {
+		fmt.Fprintf(os.Stderr, "nlm: WARNING: %s\n", warning)
+		fmt.Fprintf(os.Stderr, "nlm: Try manually: open notebooklm.google.com in Chrome, copy a batchexecute request as cURL, then pipe to: ./nlm auth\n")
+	}
+
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		return "", "", fmt.Errorf("get home dir: %w", err)
 	}
 
-	// Create .nlm directory if it doesn't exist
 	nlmDir := filepath.Join(homeDir, ".nlm")
 	if err := os.MkdirAll(nlmDir, 0700); err != nil {
 		return "", "", fmt.Errorf("create .nlm directory: %w", err)
 	}
 
-	// Create or update env file
 	envFile := filepath.Join(nlmDir, "env")
 	content := fmt.Sprintf("NLM_COOKIES=%q\nNLM_AUTH_TOKEN=%q\nNLM_BROWSER_PROFILE=%q\n",
 		cookies,
@@ -103,6 +108,21 @@ func persistAuthToDisk(cookies, authToken, profileName string) (string, string, 
 
 	fmt.Fprintf(os.Stderr, "nlm: auth info written to %s\n", envFile)
 	return authToken, cookies, nil
+}
+
+func validateCookies(cookies string) string {
+	requiredCookies := []string{"SID", "SSID", "__Secure-1PSID"}
+	hasRequired := false
+	for _, required := range requiredCookies {
+		if strings.Contains(cookies, required+"=") {
+			hasRequired = true
+			break
+		}
+	}
+	if !hasRequired {
+		return "Captured cookies may be incomplete (missing authenticated session cookies like SID, SSID). You may not be logged into Google in the browser profile."
+	}
+	return ""
 }
 
 func loadStoredEnv() {

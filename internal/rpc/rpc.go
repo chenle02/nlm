@@ -108,11 +108,9 @@ func New(authToken, cookies string, options ...batchexecute.Option) *Client {
 			"pragma":          "no-cache",
 		},
 		URLParams: map[string]string{
-			"bl":    "boq_labs-tailwind-frontend_20241114.01_p0",
-			"f.sid": "-7121977511756781186",
+			"bl":    "boq_labs-tailwind-frontend_20260115.08_p0",
+			"f.sid": "-544466618497653285",
 			"hl":    "en",
-			// Omit this to get cleaner output.
-			//"rt":    "c",
 		},
 	}
 	return &Client{

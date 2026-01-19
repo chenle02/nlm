@@ -3,6 +3,7 @@ package batchexecute
 import (
 	"embed"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -256,7 +257,6 @@ func TestExecute(t *testing.T) {
 
 func TestExecuteErrorChunk(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Return a chunked error response
 		errorChunk := `[["e",4,null,null,237]]`
 		fmt.Fprintf(w, ")]}'\n%d\n%s\n", len(errorChunk), errorChunk)
 	}))
@@ -279,5 +279,32 @@ func TestExecuteErrorChunk(t *testing.T) {
 	}
 	if response.Error != "237" {
 		t.Fatalf("expected error 237, got %q", response.Error)
+	}
+}
+
+func TestExecuteUnauthenticated(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		chunk := `[["wrb.fr","wXbhsf",null,null,null,[16],"generic"]]`
+		fmt.Fprintf(w, ")]}'\n%d\n%s\n", len(chunk), chunk)
+	}))
+	defer server.Close()
+
+	config := Config{
+		Host:      strings.TrimPrefix(server.URL, "http://"),
+		App:       "notebooklm",
+		AuthToken: "test_token",
+		Headers:   map[string]string{"Content-Type": "application/x-www-form-urlencoded"},
+		UseHTTP:   true,
+	}
+	client := NewClient(config, WithHTTPClient(server.Client()))
+
+	rpc := RPC{ID: "wXbhsf", Args: []interface{}{}, Index: "generic"}
+
+	_, err := client.Execute([]RPC{rpc})
+	if err == nil {
+		t.Fatal("Expected ErrUnauthorized, got nil")
+	}
+	if !errors.Is(err, ErrUnauthorized) {
+		t.Fatalf("Expected ErrUnauthorized, got: %v", err)
 	}
 }
