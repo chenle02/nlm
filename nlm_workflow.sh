@@ -1,1 +1,1 @@
-/home/lzc0090/bin/nlm_workflow.sh
+scripts/nlm_workflow.sh
