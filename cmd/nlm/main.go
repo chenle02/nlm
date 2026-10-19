@@ -602,40 +602,14 @@ func generateSection(c *api.Client, notebookID string) error {
 func createAudioOverview(c *api.Client, projectID string, instructions string) error {
 	fmt.Printf("Creating audio overview for notebook %s...\n", projectID)
 	fmt.Printf("Instructions: %s\n", instructions)
-
-	result, err := c.CreateAudioOverview(projectID, instructions)
+	id, err := c.CreateAudioArtifact(projectID, instructions, "en")
 	if err != nil {
-		return fmt.Errorf("create audio overview: %w", err)
+		return err
 	}
-
-	if !result.IsReady {
-		fmt.Println("✅ Audio overview creation started. Use 'nlm audio-get' to check status.")
-		return nil
-	}
-
-	// If the result is immediately ready (unlikely but possible)
-	fmt.Printf("✅ Audio Overview created:\n")
-	fmt.Printf("  Title: %s\n", result.Title)
-	fmt.Printf("  ID: %s\n", result.AudioID)
-
-	// Save audio file if available
-	if result.AudioData != "" {
-		audioData, err := result.GetAudioBytes()
-		if err != nil {
-			return fmt.Errorf("decode audio data: %w", err)
-		}
-
-		filename := fmt.Sprintf("audio_overview_%s.wav", result.AudioID)
-		if err := os.WriteFile(filename, audioData, 0644); err != nil {
-			return fmt.Errorf("save audio file: %w", err)
-		}
-		fmt.Printf("  Saved audio to: %s\n", filename)
-	}
-
+	fmt.Printf("✅ Audio overview creation started (artifact %s). Use 'nlm audio-get' to download it when ready.\n", id)
 	return nil
 }
 
-// Video operations
 func createVideoOverview(c *api.Client, projectID string, instructions string) error {
 	fmt.Printf("Creating video overview for notebook %s...\n", projectID)
 	fmt.Printf("Instructions: %s\n", instructions)

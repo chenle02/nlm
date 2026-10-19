@@ -3,6 +3,7 @@ package api
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -187,6 +188,10 @@ func (a Artifact) MediaFileName() string {
 	return name + ext
 }
 
+// ErrMediaNotReady: the artifact is marked ready but its file is not served yet. Right
+// after generation the Download link answers 404 for a minute or two (2026-10-18).
+var ErrMediaNotReady = errors.New("media file not available yet")
+
 // DownloadMedia saves the artifact's file into dir and returns its path.
 //
 // The media link redirects through accounts.google.com, which needs that host's cookies,
@@ -211,6 +216,9 @@ func DownloadMedia(a Artifact, dir string) (string, error) {
 		return "", fmt.Errorf("download %s: %w", a.KindName(), err)
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotFound {
+		return "", ErrMediaNotReady
+	}
 	if resp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("download %s: HTTP %d", a.KindName(), resp.StatusCode)
 	}
@@ -279,4 +287,107 @@ func loadCookieJar() (*cookiejar.Jar, error) {
 		jar.SetCookies(&url.URL{Scheme: "https", Host: host, Path: "/"}, cs)
 	}
 	return jar, nil
+}
+
+// RPCCreateArtifact creates a studio artifact (audio, video, report, ...). It replaced
+// AHyHrd, which now only returns the notebook's existing audio overview (2026-10-18).
+// Payload as the web app sends it, matching notebooklm-py (_web/params/creation.py)
+// and OpenCLI (clis/notebooklm/generate-audio.js).
+const RPCCreateArtifact = "R7cb6c"
+
+// Audio overview options in the R7cb6c payload.
+const (
+	AudioFormatDeepDive = 1 // also 2 brief, 3 critique, 4 debate
+	AudioLengthDefault  = 2 // also 1 short, 3 long
+)
+
+// artifactClientOptions is param 0 of R7cb6c, the web client's capability envelope.
+func artifactClientOptions() []interface{} {
+	return []interface{}{2, nil, nil,
+		[]interface{}{1, nil, nil, nil, nil, nil, nil, nil, nil, nil, []interface{}{1}},
+		[]interface{}{[]interface{}{1, 4, 8, 2, 3, 6}}}
+}
+
+// CreateAudioArtifact starts an audio overview over all the notebook's sources and
+// returns the new artifact's id. Download it with DownloadMedia once ListArtifacts
+// shows it ready.
+func (c *Client) CreateAudioArtifact(projectID, instructions, language string) (string, error) {
+	p, err := c.GetProject(projectID)
+	if err != nil {
+		return "", fmt.Errorf("get notebook sources: %w", err)
+	}
+	var ids []string
+	for _, s := range p.Sources {
+		if s.SourceId != nil && s.SourceId.GetSourceId() != "" {
+			ids = append(ids, s.SourceId.GetSourceId())
+		}
+	}
+	if len(ids) == 0 {
+		return "", fmt.Errorf("notebook %s has no sources", projectID)
+	}
+	resp, err := c.rpc.Do(rpc.Call{
+		ID:         RPCCreateArtifact,
+		Args:       audioArtifactArgs(projectID, ids, instructions, language),
+		NotebookID: projectID,
+	})
+	if err != nil {
+		return "", fmt.Errorf("create audio overview: %w", err)
+	}
+	skip := map[string]bool{projectID: true}
+	for _, id := range ids {
+		skip[id] = true
+	}
+	if id := firstNewUUID(resp, skip); id != "" {
+		return id, nil
+	}
+	return "", fmt.Errorf("create audio overview: no artifact id in the reply")
+}
+
+var uuidRE = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
+
+// firstNewUUID returns the first UUID in the reply that is not the notebook or a source.
+func firstNewUUID(resp json.RawMessage, skip map[string]bool) string {
+	var v interface{}
+	if json.Unmarshal(resp, &v) != nil {
+		return ""
+	}
+	var walk func(interface{}) string
+	walk = func(x interface{}) string {
+		switch t := x.(type) {
+		case string:
+			if uuidRE.MatchString(t) && !skip[t] {
+				return t
+			}
+		case []interface{}:
+			for _, e := range t {
+				if s := walk(e); s != "" {
+					return s
+				}
+			}
+		}
+		return ""
+	}
+	return walk(v)
+}
+
+// audioArtifactArgs is the R7cb6c argument list for a deep-dive audio overview:
+// [clientOptions, notebookId, [null, null, 1, [[[src]]...], null, null,
+//
+//	[null, [instructions, length, null, [[src]]..., language, null, format]]]].
+func audioArtifactArgs(projectID string, sourceIDs []string, instructions, language string) []interface{} {
+	if language == "" {
+		language = "en"
+	}
+	var nested2, nested1 []interface{} // [[[id]], ...] and [[id], ...]
+	for _, id := range sourceIDs {
+		nested2 = append(nested2, []interface{}{[]interface{}{id}})
+		nested1 = append(nested1, []interface{}{id})
+	}
+	var instr interface{}
+	if instructions != "" {
+		instr = instructions
+	}
+	config := []interface{}{nil, []interface{}{instr, AudioLengthDefault, nil, nested1, language, nil, AudioFormatDeepDive}}
+	descriptor := []interface{}{nil, nil, ArtifactAudio, nested2, nil, nil, config}
+	return []interface{}{artifactClientOptions(), projectID, descriptor}
 }

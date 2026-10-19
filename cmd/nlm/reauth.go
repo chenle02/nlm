@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -63,15 +64,18 @@ func downloadArtifact(c *api.Client, projectID string, kind int, dir string) err
 	}
 	name := map[int]string{api.ArtifactAudio: "audio", api.ArtifactVideo: "video"}[kind]
 	found := false
-	for _, a := range arts {
-		if a.Kind != kind {
+	for _, a := range arts { // newest first: only the newest of the kind counts, so a
+		if a.Kind != kind { // fresh audio-create waits instead of re-downloading an old one
 			continue
 		}
 		found = true
 		if !a.Ready() {
-			continue
+			break
 		}
 		path, err := api.DownloadMedia(a, dir)
+		if errors.Is(err, api.ErrMediaNotReady) {
+			break // just generated: the file is not served yet, report not ready
+		}
 		if err != nil {
 			return err
 		}
