@@ -103,7 +103,7 @@ func (c *Client) ListRecentlyViewedProjects() ([]*pb.RecentlyViewedProject, erro
 				}
 			}
 		}
-		
+
 		// If that didn't work, try the creation time from metadata[8]
 		if lastViewTime == nil && len(projectArray) > 5 {
 			if metadata, ok := projectArray[5].([]interface{}); ok && len(metadata) > 8 {
@@ -1046,8 +1046,8 @@ func (c *Client) ListAudioOverviewsFast(projectID string) ([]*AudioOverviewResul
 		description string
 		expectLarge bool
 	}{
-		{0, "Extended", false},  // Type 0 - likely no embedded data
-		{1, "Standard", true},   // Type 1 - has embedded data
+		{0, "Extended", false}, // Type 0 - likely no embedded data
+		{1, "Standard", true},  // Type 1 - has embedded data
 	}
 
 	for _, audioType := range audioTypes {
@@ -1081,7 +1081,7 @@ func (c *Client) ListAudioOverviewsFast(projectID string) ([]*AudioOverviewResul
 					AudioData:       "", // No data for listing
 					IsReady:         template.IsReady,
 					AudioType:       audioType.id,
-					DataSize:        45*1024*1024, // Known size ~45MB
+					DataSize:        45 * 1024 * 1024, // Known size ~45MB
 					HasEmbeddedData: true,
 				}
 				results = append(results, result)

@@ -35,7 +35,7 @@ func main() {
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "Usage: nlm <command> [arguments]\n\n")
 		fmt.Fprintf(os.Stderr, "Notebook Commands:\n")
-		fmt.Fprintf(os.Stderr, "  list, ls          List all notebooks\n")
+		fmt.Fprintf(os.Stderr, "  list, ls          List recently viewed notebooks\n")
 		fmt.Fprintf(os.Stderr, "  create <title>    Create a new notebook\n")
 		fmt.Fprintf(os.Stderr, "  rm <id>           Delete a notebook\n")
 		fmt.Fprintf(os.Stderr, "\n")
@@ -296,6 +296,9 @@ func list(c *api.Client) error {
 	fmt.Fprintln(w, "ID\tTITLE\tLAST VIEWED")
 	for _, p := range projects {
 		prj := p.GetProject()
+		if prj == nil {
+			continue
+		}
 		fmt.Fprintf(w, "%s\t%s\t%s\n",
 			prj.GetProjectId(), strings.TrimSpace(prj.GetEmoji())+" "+prj.GetTitle(),
 			p.GetLastViewTime().AsTime().Format(time.RFC3339),
@@ -748,7 +751,11 @@ func listAudioOverviews(c *api.Client, projectID string) error {
 		fmt.Printf("├─ Audio ID: %s\n", result.AudioID)
 		fmt.Printf("├─ API Title: %s\n", result.Title)
 		fmt.Printf("├─ Status: %s\n", func() string {
-			if result.IsReady { return "✅ Ready" } else { return "⏳ Processing" }
+			if result.IsReady {
+				return "✅ Ready"
+			} else {
+				return "⏳ Processing"
+			}
 		}())
 		fmt.Printf("├─ Characteristics: %s\n", characteristics)
 
