@@ -3,6 +3,7 @@ package rpc
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 
 	"github.com/davecgh/go-spew/spew"
 	"github.com/tmc/nlm/internal/batchexecute"
@@ -83,6 +84,24 @@ type Call struct {
 	NotebookID string        // Optional notebook ID for context
 }
 
+// NotebookLM moved from notebooklm.google.com to notebook.google.com in 2026; both still
+// answer, but the web app lives at the new host. NLM_HOST and NLM_BL override the host and
+// the frontend build label (the page's "cfb2h" value) without a rebuild.
+const (
+	defaultHost = "notebook.google.com"
+	defaultBL   = "boq_labs-tailwind-frontend_20261015.15_p0"
+)
+
+func envOr(key, def string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return def
+}
+
+// Host is the NotebookLM host every request goes to.
+func Host() string { return envOr("NLM_HOST", defaultHost) }
+
 // Client handles NotebookLM RPC communication
 type Client struct {
 	Config batchexecute.Config
@@ -92,15 +111,16 @@ type Client struct {
 // New creates a new NotebookLM RPC client
 // New creates a new NotebookLM RPC client
 func New(authToken, cookies string, options ...batchexecute.Option) *Client {
+	host := Host()
 	config := batchexecute.Config{
-		Host:      "notebooklm.google.com",
+		Host:      host,
 		App:       "LabsTailwindUi",
 		AuthToken: authToken,
 		Cookies:   cookies,
 		Headers: map[string]string{
 			"content-type":    "application/x-www-form-urlencoded;charset=UTF-8",
-			"origin":          "https://notebooklm.google.com",
-			"referer":         "https://notebooklm.google.com/",
+			"origin":          "https://" + host,
+			"referer":         "https://" + host + "/",
 			"x-same-domain":   "1",
 			"accept":          "*/*",
 			"accept-language": "en-US,en;q=0.9",
@@ -108,7 +128,7 @@ func New(authToken, cookies string, options ...batchexecute.Option) *Client {
 			"pragma":          "no-cache",
 		},
 		URLParams: map[string]string{
-			"bl":    "boq_labs-tailwind-frontend_20260115.08_p0",
+			"bl":    envOr("NLM_BL", defaultBL),
 			"f.sid": "-544466618497653285",
 			"hl":    "en",
 		},

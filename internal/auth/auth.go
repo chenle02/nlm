@@ -259,7 +259,7 @@ func copyFile(src, dst string) error {
 func (ba *BrowserAuth) extractAuthData(ctx context.Context) (token, cookies string, err error) {
 	// Navigate and wait for initial page load
 	if err := chromedp.Run(ctx,
-		chromedp.Navigate("https://notebooklm.google.com"),
+		chromedp.Navigate("https://notebook.google.com"),
 		chromedp.WaitVisible("body", chromedp.ByQuery),
 	); err != nil {
 		return "", "", fmt.Errorf("failed to load page: %w", err)
@@ -321,7 +321,7 @@ func (ba *BrowserAuth) tryExtractAuth(ctx context.Context) (token, cookies strin
 	err = chromedp.Run(ctx,
 		chromedp.Evaluate(`WIZ_global_data.SNlM0e`, &token),
 		chromedp.ActionFunc(func(ctx context.Context) error {
-			cks, err := network.GetCookies().WithUrls([]string{"https://notebooklm.google.com"}).Do(ctx)
+			cks, err := network.GetCookies().WithUrls([]string{"https://notebook.google.com"}).Do(ctx)
 			if err != nil {
 				return fmt.Errorf("get cookies: %w", err)
 			}

@@ -51,7 +51,7 @@ func newSafariAutomation(debug bool) *SafariAutomation {
 tell application "Safari"
     activate
     make new document
-    set URL of document 1 to "https://notebooklm.google.com"
+    set URL of document 1 to "https://notebook.google.com"
 
     -- Wait for page load
     repeat until (do JavaScript "!!window.WIZ_global_data" in document 1) is true

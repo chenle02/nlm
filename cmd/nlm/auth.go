@@ -82,7 +82,7 @@ func detectAuthInfo(cmd string) (string, string, error) {
 func persistAuthToDisk(cookies, authToken, profileName string) (string, string, error) {
 	if warning := validateCookies(cookies); warning != "" {
 		fmt.Fprintf(os.Stderr, "nlm: WARNING: %s\n", warning)
-		fmt.Fprintf(os.Stderr, "nlm: Try manually: open notebooklm.google.com in Chrome, copy a batchexecute request as cURL, then pipe to: ./nlm auth\n")
+		fmt.Fprintf(os.Stderr, "nlm: Try manually: open notebook.google.com in a browser, copy a batchexecute request as cURL, then pipe to: ./nlm auth\n")
 	}
 
 	homeDir, err := os.UserHomeDir()
