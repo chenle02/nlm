@@ -172,7 +172,7 @@ main() {
 
   local base
   base=$(basename "${pdf%.*}")
-  local outfile="${PWD}/${base}.wav"
+  local outfile="${PWD}/${base}.m4a"   # nlm audio-get saves .m4a (2026-10-18)
 
   if check_notebook_exists "$base"; then
     if [[ -s "$outfile" ]]; then

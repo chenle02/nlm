@@ -57,14 +57,14 @@ func main() {
 		fmt.Fprintf(os.Stderr, "Audio Commands:\n")
 		fmt.Fprintf(os.Stderr, "  audio-create <id> <instructions>  Create audio overview\n")
 		fmt.Fprintf(os.Stderr, "  audio-list <id>   List all available audio overviews\n")
-		fmt.Fprintf(os.Stderr, "  audio-get <id> [type]  Get audio overview (optionally specify type)\n")
+		fmt.Fprintf(os.Stderr, "  audio-get <id> [dir]   Download the newest ready audio overview (.m4a)\n")
 		fmt.Fprintf(os.Stderr, "  audio-rm <id>     Delete audio overview\n")
 		fmt.Fprintf(os.Stderr, "  audio-share <id>  Share audio overview\n\n")
 
 		fmt.Fprintf(os.Stderr, "Video Commands:\n")
-		fmt.Fprintf(os.Stderr, "  video-create <id> <instructions>  Create video overview\n")
-		fmt.Fprintf(os.Stderr, "  video-get <id>    Get video overview\n")
-		fmt.Fprintf(os.Stderr, "  video-rm <id>     Delete video overview\n\n")
+		fmt.Fprintf(os.Stderr, "  video-get <id> [dir]   Download the newest ready video overview (.mp4)\n")
+		fmt.Fprintf(os.Stderr, "  artifacts <id>    List audio/video overviews and other studio outputs\n")
+		fmt.Fprintf(os.Stderr, "  (create video overviews in the NotebookLM web app)\n\n")
 
 		fmt.Fprintf(os.Stderr, "Generation Commands:\n")
 		fmt.Fprintf(os.Stderr, "  generate-guide <id>  Generate notebook guide\n")
@@ -108,31 +108,19 @@ func run() error {
 	if debug {
 		optsExec = append(optsExec, batchexecute.WithDebug(true))
 	}
-	for i := 0; i < 3; i++ {
-		if i > 1 {
-			fmt.Fprintln(os.Stderr, "nlm: attempting again to obtain login information")
-			debug = true
-		}
-
-		// Attempt the command; enable debug after second failure as well
-		currentOpts := optsExec
-		if i > 1 && !debug {
-			// turn on debug on retry
-			currentOpts = append(currentOpts, batchexecute.WithDebug(true))
-		}
-		client := api.New(authToken, cookies, currentOpts...)
-		if err := runCmd(client, cmd, args...); err == nil {
-			return nil
-		} else if !errors.Is(err, batchexecute.ErrUnauthorized) {
+	err := runCmd(api.New(authToken, cookies, optsExec...), cmd, args...)
+	if !errors.Is(err, batchexecute.ErrUnauthorized) {
+		return err
+	}
+	// Expired login: refresh it from Firefox once and retry. (This used to try the
+	// Chrome browser login three times, which cannot work here.)
+	if t, c, ok := tryReauth(); ok {
+		err = runCmd(api.New(t, c, optsExec...), cmd, args...)
+		if !errors.Is(err, batchexecute.ErrUnauthorized) {
 			return err
 		}
-
-		var err error
-		if authToken, cookies, err = handleAuth(nil, debug); err != nil {
-			fmt.Fprintf(os.Stderr, "  -> %v\n", err)
-		}
 	}
-	return fmt.Errorf("nlm: failed after 3 attempts")
+	return fmt.Errorf("nlm: the NotebookLM login has expired. Sign in at https://notebook.google.com in Firefox and run nlm-reauth (or nlm auth)")
 }
 
 func runCmd(client *api.Client, cmd string, args ...string) error {
@@ -206,13 +194,18 @@ func runCmd(client *api.Client, cmd string, args ...string) error {
 		err = listAudioOverviews(client, args[0])
 	case "audio-get":
 		if len(args) < 1 || len(args) > 2 {
-			log.Fatal("usage: nlm audio-get <notebook-id> [type]")
+			log.Fatal("usage: nlm audio-get <notebook-id> [dir]")
 		}
-		if len(args) == 1 {
-			err = getAudioOverview(client, args[0])
-		} else {
+		if len(args) == 2 && isDigits(args[1]) { // the old "audio-get <id> <type>"
 			err = getAudioOverviewByType(client, args[0], args[1])
+		} else {
+			err = downloadArtifact(client, args[0], api.ArtifactAudio, argOr(args, 1, "."))
 		}
+	case "artifacts":
+		if len(args) != 1 {
+			log.Fatal("usage: nlm artifacts <notebook-id>")
+		}
+		err = listArtifacts(client, args[0])
 	case "audio-rm":
 		if len(args) != 1 {
 			log.Fatal("usage: nlm audio-rm <notebook-id>")
@@ -225,21 +218,14 @@ func runCmd(client *api.Client, cmd string, args ...string) error {
 		err = shareAudioOverview(client, args[0])
 
 		// Video operations
-	case "video-create":
-		if len(args) != 2 {
-			log.Fatal("usage: nlm video-create <notebook-id> <instructions>")
-		}
-		err = createVideoOverview(client, args[0], args[1])
+	case "video-create", "video-rm":
+		// Their RPC ids were never discovered (rpc.go has UNKNOWN placeholders).
+		err = fmt.Errorf("nlm %s is not supported yet: do it in the NotebookLM web app", cmd)
 	case "video-get":
-		if len(args) != 1 {
-			log.Fatal("usage: nlm video-get <notebook-id>")
+		if len(args) < 1 || len(args) > 2 {
+			log.Fatal("usage: nlm video-get <notebook-id> [dir]")
 		}
-		err = getVideoOverview(client, args[0])
-	case "video-rm":
-		if len(args) != 1 {
-			log.Fatal("usage: nlm video-rm <notebook-id>")
-		}
-		err = deleteVideoOverview(client, args[0])
+		err = downloadArtifact(client, args[0], api.ArtifactVideo, argOr(args, 1, "."))
 
 		// Generation operations
 	case "generate-guide":
@@ -850,3 +836,24 @@ func getAudioOverviewByType(c *api.Client, projectID, audioTypeStr string) error
 func heartbeat(c *api.Client) error {
 	return nil
 }
+
+func isDigits(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+func argOr(args []string, i int, def string) string {
+	if i < len(args) {
+		return args[i]
+	}
+	return def
+}
+
+func newTabWriter() *tabwriter.Writer { return tabwriter.NewWriter(os.Stdout, 0, 4, 4, ' ', 0) }

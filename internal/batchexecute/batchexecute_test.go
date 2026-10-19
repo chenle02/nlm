@@ -308,3 +308,38 @@ func TestExecuteUnauthenticated(t *testing.T) {
 		t.Fatalf("Expected ErrUnauthorized, got: %v", err)
 	}
 }
+
+// The UNAUTHENTICATED reply Office got on 2026-10-18: the chunk lengths do not match the
+// bytes, which used to make nlm ls print an empty list instead of the auth error.
+func TestDecodeChunkedUnauthenticatedWithWrongLengths(t *testing.T) {
+	raw := ")]}'\n\n105\n" +
+		`[["wrb.fr","wXbhsf",null,null,null,[16],"generic"],["di",20],["af.httprm",19,"-7604889669387110353",4]]` +
+		"\n25\n" + `[["e",4,null,null,141]]` + "\n"
+	responses, err := decodeChunkedResponse(raw)
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	found := false
+	for _, r := range responses {
+		if r.ID == "wXbhsf" && r.Error == "unauthorized" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("want an unauthorized wXbhsf response, got %+v", responses)
+	}
+}
+
+// A large reply whose chunk lengths count characters, not bytes (emoji in notebook
+// titles): the line fallback must return the data and ignore the closing "e" chunk.
+func TestDecodeChunkedMultibyteLengthsIgnoresEndMarker(t *testing.T) {
+	body := `[["wrb.fr","wXbhsf","[[[\"📐 Tensors\",[],\"3672824c\"]]]",null,null,null,"generic"]]`
+	raw := ")]}'\n\n" + "70" + "\n" + body + "\n25\n" + `[["e",4,null,null,152427]]` + "\n"
+	responses, err := decodeChunkedResponse(raw)
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(responses) != 1 || responses[0].ID != "wXbhsf" || responses[0].Error != "" {
+		t.Fatalf("want one wXbhsf data response, got %+v", responses)
+	}
+}

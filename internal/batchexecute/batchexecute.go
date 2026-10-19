@@ -283,8 +283,43 @@ func decodeResponse(raw string) ([]Response, error) {
 	return result, nil
 }
 
-// decodeChunkedResponse decodes the batchexecute response
+// decodeChunkedResponse decodes the batchexecute response. Google's chunk lengths do not
+// always match the bytes (an UNAUTHENTICATED reply on 2026-10-18 failed with "invalid
+// character '2' after top-level value", so nlm ls printed an empty list instead of the
+// auth error); when the length-prefixed parse fails, each JSON line is parsed on its own.
 func decodeChunkedResponse(raw string) ([]Response, error) {
+	responses, err := decodeChunkedByLength(raw)
+	if err == nil {
+		return responses, nil
+	}
+	if byLine, lineErr := decodeChunkedByLine(raw); lineErr == nil {
+		return byLine, nil
+	}
+	return nil, err
+}
+
+// decodeChunkedByLine parses every line that holds a JSON array as one chunk.
+func decodeChunkedByLine(raw string) ([]Response, error) {
+	raw = strings.TrimSpace(strings.TrimPrefix(raw, ")]}'"))
+	var responses []Response
+	for _, line := range strings.Split(raw, "\n") {
+		line = strings.TrimSpace(line)
+		// [["e",4,null,null,<bytes>]] closes the reply; it is not an error
+		if !strings.HasPrefix(line, "[") || strings.HasPrefix(line, `[["e",`) {
+			continue
+		}
+		if err := handleChunk([]byte(line), &responses); err != nil {
+			return nil, err
+		}
+	}
+	if len(responses) == 0 {
+		return nil, fmt.Errorf("no valid responses found")
+	}
+	return responses, nil
+}
+
+// decodeChunkedByLength decodes a length-prefixed batchexecute response.
+func decodeChunkedByLength(raw string) ([]Response, error) {
 	raw = strings.TrimSpace(strings.TrimPrefix(raw, ")]}'"))
 	if raw == "" {
 		return nil, fmt.Errorf("empty response after trimming prefix")
