@@ -38,7 +38,7 @@ func main() {
 		fmt.Fprintf(os.Stderr, "  list, ls          List all notebooks\n")
 		fmt.Fprintf(os.Stderr, "  create <title>    Create a new notebook\n")
 		fmt.Fprintf(os.Stderr, "  rm <id>           Delete a notebook\n")
-		fmt.Fprintf(os.Stderr, "  analytics <id>    Show notebook analytics\n\n")
+		fmt.Fprintf(os.Stderr, "\n")
 
 		fmt.Fprintf(os.Stderr, "Source Commands:\n")
 		fmt.Fprintf(os.Stderr, "  sources <id>      List sources in notebook\n")
@@ -46,7 +46,7 @@ func main() {
 		fmt.Fprintf(os.Stderr, "  rm-source <id> <source-id>  Remove source\n")
 		fmt.Fprintf(os.Stderr, "  rename-source <source-id> <new-name>  Rename source\n")
 		fmt.Fprintf(os.Stderr, "  refresh-source <source-id>  Refresh source content\n")
-		fmt.Fprintf(os.Stderr, "  check-source <source-id>  Check source freshness\n\n")
+		fmt.Fprintf(os.Stderr, "\n")
 
 		fmt.Fprintf(os.Stderr, "Note Commands:\n")
 		fmt.Fprintf(os.Stderr, "  notes <id>        List notes in notebook\n")
@@ -73,8 +73,6 @@ func main() {
 
 		fmt.Fprintf(os.Stderr, "Other Commands:\n")
 		fmt.Fprintf(os.Stderr, "  auth [profile]    Setup authentication\n")
-		fmt.Fprintf(os.Stderr, "  share <id>        Share notebook\n")
-		fmt.Fprintf(os.Stderr, "  feedback <msg>    Submit feedback\n")
 		fmt.Fprintf(os.Stderr, "  hb                Send heartbeat\n\n")
 	}
 
@@ -170,6 +168,21 @@ func runCmd(client *api.Client, cmd string, args ...string) error {
 			log.Fatal("usage: nlm new-note <notebook-id> <title>")
 		}
 		err = createNote(client, args[0], args[1])
+	case "notes": // advertised in the usage text but never dispatched before 0.3.0
+		if len(args) != 1 {
+			log.Fatal("usage: nlm notes <notebook-id>")
+		}
+		err = listNotes(client, args[0])
+	case "edit-note":
+		if len(args) != 3 {
+			log.Fatal("usage: nlm edit-note <notebook-id> <note-id> <content>")
+		}
+		err = editNote(client, args[0], args[1], args[2])
+	case "refresh-source":
+		if len(args) != 1 {
+			log.Fatal("usage: nlm refresh-source <source-id>")
+		}
+		err = refreshSource(client, args[0])
 	case "update-note":
 		if len(args) != 4 {
 			log.Fatal("usage: nlm update-note <notebook-id> <note-id> <content> <title>")

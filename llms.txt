@@ -1,0 +1,105 @@
+# nlm (chenle02 fork) — llms.txt
+
+> Command-line client for Google NotebookLM (https://notebook.google.com): notebooks, sources, notes, audio and video overviews. Build: `go build -o nlm ./cmd/nlm` (or use the committed Linux binary `./nlm`). Tests: `go test ./cmd/... ./internal/api/... ./internal/batchexecute/...`.
+> Human docs: README.md, CHANGELOG.md, RELEASING.md. Agent rules for changing the code: AGENTS.md.
+> This fork has diverged from tmc/nlm and is developed on its own line (README.md, "Relation to upstream"). tests: cmd/nlm/llms_test.go checks that this file names every command nlm dispatches.
+
+PURPOSE
+nlm talks to NotebookLM's private web RPC (batchexecute under /_/LabsTailwindUi) with the
+signed-in user's cookies. There is no official API: Google changes RPC ids, payloads and
+the frontend build label without notice, so treat a sudden failure as API drift first.
+
+STANDING RULES
+- Never print, log or commit ~/.nlm/env or ~/.nlm/cookies.txt: they are the user's Google
+  session. They are mode 600 and machine-local.
+- Prefer the commands marked [verified] below; [carried] commands come from upstream and
+  were not re-tested after NotebookLM's 2026 changes.
+- Media files (audio .m4a, video .mp4) are downloaded, never streamed: use audio-get and
+  video-get, not the googlevideo links.
+- Creating an audio overview spends the user's NotebookLM quota: run audio-create only when
+  asked.
+
+COMMANDS (nlm <command> [arguments]; [verified] = checked live 2026-10-18)
+Notebooks
+  list | ls                          list notebooks: ID, TITLE, LAST VIEWED [verified]
+  create <title>                     create a notebook, print its id [carried]
+  rm <id>                            delete a notebook [carried]
+Sources
+  sources <id>                       list sources: ID, TITLE, TYPE, STATUS [verified]
+  add <id> <file|url|->              add a source from a file, URL or stdin [carried]
+  rm-source <id> <source-id>         remove a source [carried]
+  rename-source <source-id> <name>   rename a source [carried]
+  refresh-source <source-id>         refresh a source's content [carried]
+Notes
+  notes <id>                         list notes [verified: runs; tested on a notebook without notes]
+  new-note <id> <title>              create a note [carried]
+  edit-note <id> <note-id> <content> edit a note's content [carried]
+  update-note <id> <note-id> <content> <title>  edit content and title [carried]
+  rm-note <note-id>                  remove a note [carried]
+Audio and video overviews (studio artifacts)
+  artifacts <id>                     list studio outputs: ID, KIND, READY, LENGTH, TITLE [verified]
+  audio-create <id> <instructions>   start a deep-dive audio overview over all sources (RPC
+                                     R7cb6c); prints the new artifact id [verified]
+  audio-get <id> [dir]               download the newest audio overview as <title>.m4a; prints
+                                     "Saved audio to: PATH", or "Audio overview is not ready
+                                     yet." while it generates [verified]
+  video-get <id> [dir]               the same for video, <title>.mp4, "Saved video to: PATH"
+                                     [verified]
+  audio-list <id>                    legacy audio listing (old RPC) [verified]
+  audio-get <id> <type>              legacy: audio overview metadata by type number [carried]
+  audio-rm <id>                      delete the legacy audio overview [carried]
+  audio-share <id>                   share the audio overview [carried]
+  video-create | video-rm            not supported yet: they report it and exit 1; create
+                                     videos in the web app
+Generation
+  generate-guide <id> | generate-outline <id> | generate-section <id>   [carried]
+Other
+  auth [profile]                     log in (browser, or a pasted DevTools cURL on stdin)
+  hb                                 send a heartbeat [carried]
+
+WAIT FOR A NEW AUDIO OVERVIEW
+  nlm audio-create ID "focus..."; then repeat `nlm audio-get ID DIR` every 30 s until it
+  prints "Saved audio to:" (usually 5-10 min). Right after it turns ready the file can
+  answer 404 for a minute; audio-get reports that as not ready.
+
+AUTHENTICATION
+- nlm reads NLM_COOKIES and NLM_AUTH_TOKEN from ~/.nlm/env (or the environment). Media
+  downloads also need ~/.nlm/cookies.txt (Netscape format, every google.com cookie):
+  the media links redirect through accounts.google.com.
+- Google rotates the session cookies; a saved login lasts minutes to hours. When a call
+  gets UNAUTHENTICATED, nlm runs `nlm-reauth` once if it is on PATH (it rewrites
+  ~/.nlm/env and cookies.txt from a signed-in browser) and retries. NLM_NO_REAUTH=1
+  disables that. Without nlm-reauth: `nlm auth`, or paste a DevTools cURL into
+  scripts/nlm-refresh-auth.
+- Expired login message (stderr, exit 1): "nlm: the NotebookLM login has expired. ..."
+
+ENVIRONMENT
+  NLM_COOKIES, NLM_AUTH_TOKEN   the login (normally from ~/.nlm/env)
+  NLM_HOST                      NotebookLM host (default notebook.google.com)
+  NLM_BL                        frontend build label (the page's "cfb2h" value)
+  NLM_NO_REAUTH                 1: do not run nlm-reauth on an expired login
+  NLM_BROWSER_PROFILE           browser profile for `nlm auth`
+  NLM_AUDIO_SEARCH              fast | comprehensive (legacy audio-list)
+
+EXIT CODES
+  0 ok; 1 any error, an expired login, a usage error or an unknown command (which also
+  prints the usage). There is no separate code for "not ready": parse audio-get's output.
+
+OUTPUT
+  Lists are aligned text with a header row (also when piped); there is no --json yet.
+  Times are ISO 8601 UTC.
+
+KNOWN LIMITS
+- No --json, no shell completion, flat command names (not the gh noun-verb style).
+- internal/beprotojson has two failing tests inherited from upstream.
+- video creation and deletion RPCs are not implemented; analytics, share and feedback
+  are commented out in the code (they were advertised until 0.3.0 but never ran).
+
+FILES
+  cmd/nlm/main.go            command dispatch and usage text
+  cmd/nlm/reauth.go          artifacts, audio-get/video-get, the nlm-reauth hook
+  internal/api/artifacts.go  gArtLc listing, R7cb6c audio creation, media download
+  internal/rpc/rpc.go        host, build label, RPC ids
+  internal/batchexecute/     reply decoding (chunked and line fallback)
+  scripts/nlm_workflow.sh    PDF -> notebook -> audio overview (.m4a)
+  CHANGELOG.md, RELEASING.md, scripts/release.sh
