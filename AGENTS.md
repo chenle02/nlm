@@ -1,5 +1,15 @@
 # Repository Guidelines
 
+## Relation to upstream (decided 2026-10-18: keep as-is)
+This fork stays on its own line; do not merge or rebase onto tmc/nlm without Le's say-so.
+Upstream rewrote its history (no merge base; the fork matches upstream cc9e75b, 2024-12)
+and its code (659 commits; `notebooklm/`, `internal/notebooklm/rpc/` replace our
+`internal/api`, `internal/rpc`). A trial `git merge-tree` conflicts in 14 files.
+Upstream has notebook.google.com, gArtLc listing and R7cb6c audio/video creation, but
+no video download and no full-cookie-jar media download; it rarely merges outside PRs.
+If the fork ever moves: start a branch from upstream, port the cookie-jar audio/video
+download, keep `nlm-reauth` (Firefox) local.
+
 ## Project Structure & Module Organization
 - `cmd/nlm/`: CLI entrypoint and commands (`main.go`, `auth.go`, `env.go`).
 - `internal/`: core packages
