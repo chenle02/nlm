@@ -19,6 +19,12 @@ import (
 // ErrUnauthorized represent an unauthorized request.
 var ErrUnauthorized = errors.New("unauthorized")
 
+// Google API error codes
+const (
+	// ErrorCodeUnauthenticated is Google's error code for authentication failures
+	ErrorCodeUnauthenticated = 16
+)
+
 // RPC represents a single RPC call
 type RPC struct {
 	ID        string            // RPC endpoint ID
@@ -187,14 +193,15 @@ func (c *Client) Execute(rpcs []RPC) (*Response, error) {
 
 	for _, resp := range responses {
 		if resp.Error != "" {
+			if resp.Error == "unauthorized" {
+				return nil, ErrUnauthorized
+			}
 			return &resp, nil
 		}
 	}
 
 	return &responses[0], nil
 }
-
-var debug = true
 
 // decodeResponse decodes the batchexecute response
 func decodeResponse(raw string) ([]Response, error) {
@@ -239,19 +246,22 @@ func decodeResponse(raw string) ([]Response, error) {
 			ID: id,
 		}
 
-		// Handle response data (may be JSON string or null/other type)
+		if errCode := extractErrorCode(rpcData); errCode == ErrorCodeUnauthenticated {
+			resp.Error = "unauthorized"
+			result = append(result, resp)
+			continue
+		}
+
 		switch v := rpcData[2].(type) {
 		case string:
 			resp.Data = json.RawMessage(v)
 		case nil:
-			// explicit null or empty payload: capture full RPC envelope for error inspection
 			if full, err2 := json.Marshal(rpcData); err2 == nil {
 				resp.Data = json.RawMessage(full)
 			} else {
 				resp.Data = json.RawMessage("null")
 			}
 		default:
-			// marshal other types (e.g., numbers, objects)
 			if rawData, err := json.Marshal(v); err == nil {
 				resp.Data = json.RawMessage(rawData)
 			}
@@ -273,16 +283,46 @@ func decodeResponse(raw string) ([]Response, error) {
 	return result, nil
 }
 
-// decodeChunkedResponse decodes the batchexecute response
+// decodeChunkedResponse decodes the batchexecute response. Google's chunk lengths do not
+// always match the bytes (an UNAUTHENTICATED reply on 2026-10-18 failed with "invalid
+// character '2' after top-level value", so nlm ls printed an empty list instead of the
+// auth error); when the length-prefixed parse fails, each JSON line is parsed on its own.
 func decodeChunkedResponse(raw string) ([]Response, error) {
+	responses, err := decodeChunkedByLength(raw)
+	if err == nil {
+		return responses, nil
+	}
+	if byLine, lineErr := decodeChunkedByLine(raw); lineErr == nil {
+		return byLine, nil
+	}
+	return nil, err
+}
+
+// decodeChunkedByLine parses every line that holds a JSON array as one chunk.
+func decodeChunkedByLine(raw string) ([]Response, error) {
+	raw = strings.TrimSpace(strings.TrimPrefix(raw, ")]}'"))
+	var responses []Response
+	for _, line := range strings.Split(raw, "\n") {
+		line = strings.TrimSpace(line)
+		// [["e",4,null,null,<bytes>]] closes the reply; it is not an error
+		if !strings.HasPrefix(line, "[") || strings.HasPrefix(line, `[["e",`) {
+			continue
+		}
+		if err := handleChunk([]byte(line), &responses); err != nil {
+			return nil, err
+		}
+	}
+	if len(responses) == 0 {
+		return nil, fmt.Errorf("no valid responses found")
+	}
+	return responses, nil
+}
+
+// decodeChunkedByLength decodes a length-prefixed batchexecute response.
+func decodeChunkedByLength(raw string) ([]Response, error) {
 	raw = strings.TrimSpace(strings.TrimPrefix(raw, ")]}'"))
 	if raw == "" {
 		return nil, fmt.Errorf("empty response after trimming prefix")
-	}
-
-	// Try parsing as a regular response first
-	if responses, err := decodeResponse(raw); err == nil {
-		return responses, nil
 	}
 
 	// If that fails, try parsing as a chunked response
@@ -302,9 +342,6 @@ func decodeChunkedResponse(raw string) ([]Response, error) {
 		}
 		totalLength, err := strconv.Atoi(lengthStr)
 		if err != nil {
-			if debug {
-				fmt.Printf("Invalid length string: %q\n", lengthStr)
-			}
 			// Try parsing as a regular response again
 			if responses2, err := decodeResponse(raw); err == nil {
 				return responses2, nil
@@ -315,11 +352,8 @@ func decodeChunkedResponse(raw string) ([]Response, error) {
 			break
 		}
 		chunk := make([]byte, totalLength)
-		n, err := io.ReadFull(reader, chunk)
+		_, err = io.ReadFull(reader, chunk)
 		if err != nil {
-			if debug {
-				fmt.Printf("Failed to read chunk: got %d bytes, wanted %d: %v\n", n, totalLength, err)
-			}
 			// Try parsing as a regular response again
 			if responses2, err := decodeResponse(raw); err == nil {
 				return responses2, nil
@@ -337,18 +371,11 @@ func decodeChunkedResponse(raw string) ([]Response, error) {
 }
 
 func handleChunk(chunk []byte, responses *[]Response) error {
-	if debug {
-		fmt.Printf("Processing chunk (%d bytes): %q\n", len(chunk),
-			string(chunk[:min(100, len(chunk))]))
-	}
-
-	// Parse the chunk
 	var rpcBatch [][]interface{}
 	if err := json.Unmarshal(chunk, &rpcBatch); err != nil {
 		return fmt.Errorf("parse chunk: %w", err)
 	}
 
-	// Process each RPC response in the batch
 	for _, rpcData := range rpcBatch {
 		if len(rpcData) > 0 {
 			if rpcType, ok := rpcData[0].(string); ok && rpcType == "e" {
@@ -363,16 +390,10 @@ func handleChunk(chunk []byte, responses *[]Response) error {
 			}
 		}
 		if len(rpcData) < 7 {
-			if debug {
-				fmt.Printf("Skipping short RPC data: %v\n", rpcData)
-			}
 			continue
 		}
 		rpcType, ok := rpcData[0].(string)
 		if !ok || rpcType != "wrb.fr" {
-			if debug {
-				fmt.Printf("Skipping non-wrb.fr RPC: %v\n", rpcData[0])
-			}
 			continue
 		}
 
@@ -381,23 +402,25 @@ func handleChunk(chunk []byte, responses *[]Response) error {
 			ID: id,
 		}
 
-		// Handle data: normally rpcData[2] is JSON string payload
+		if errCode := extractErrorCode(rpcData); errCode == ErrorCodeUnauthenticated {
+			resp.Error = "unauthorized"
+			*responses = append(*responses, resp)
+			continue
+		}
+
 		switch v := rpcData[2].(type) {
 		case string:
 			resp.Data = json.RawMessage(v)
 		case nil:
-			// No direct data; fall back to full rpcData envelope
 			if full, err := json.Marshal(rpcData); err == nil {
 				resp.Data = json.RawMessage(full)
 			}
 		default:
-			// Unexpected type (array or object), marshal entire rpcData
 			if full, err := json.Marshal(rpcData); err == nil {
 				resp.Data = json.RawMessage(full)
 			}
 		}
 
-		// Handle index
 		if rpcData[6] == "generic" {
 			resp.Index = 0
 		} else if indexStr, ok := rpcData[6].(string); ok {
@@ -408,6 +431,20 @@ func handleChunk(chunk []byte, responses *[]Response) error {
 	}
 
 	return nil
+}
+
+func extractErrorCode(rpcData []interface{}) int {
+	if len(rpcData) <= 5 {
+		return 0
+	}
+	errArray, ok := rpcData[5].([]interface{})
+	if !ok || len(errArray) == 0 {
+		return 0
+	}
+	if code, ok := errArray[0].(float64); ok {
+		return int(code)
+	}
+	return 0
 }
 
 func min(a, b int) int {

@@ -3,6 +3,7 @@ package batchexecute
 import (
 	"embed"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -11,6 +12,8 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
+	pb "github.com/tmc/nlm/gen/notebooklm/v1alpha1"
+	"github.com/tmc/nlm/internal/beprotojson"
 )
 
 //go:embed testdata/*txt
@@ -34,6 +37,21 @@ func TestDecodeResponse(t *testing.T) {
 				if len(resp) != 1 {
 					t.Errorf("Expected 1 response, got %d", len(resp))
 					return
+				}
+
+				var raw [][]json.RawMessage
+				if err := json.Unmarshal(resp[0].Data, &raw); err != nil {
+					t.Fatalf("Failed to unmarshal project list: %v", err)
+				}
+				if len(raw) != 2 {
+					t.Errorf("Expected 2 projects, got %d", len(raw))
+				}
+				var p pb.Project
+				if err := beprotojson.Unmarshal(raw[0][0], &p); err != nil {
+					t.Fatalf("Failed to parse first project: %v", err)
+				}
+				if p.GetTitle() != "Alpha" {
+					t.Errorf("Expected first project title Alpha, got %s", p.GetTitle())
 				}
 			},
 			err: nil,
@@ -239,7 +257,6 @@ func TestExecute(t *testing.T) {
 
 func TestExecuteErrorChunk(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Return a chunked error response
 		errorChunk := `[["e",4,null,null,237]]`
 		fmt.Fprintf(w, ")]}'\n%d\n%s\n", len(errorChunk), errorChunk)
 	}))
@@ -262,5 +279,67 @@ func TestExecuteErrorChunk(t *testing.T) {
 	}
 	if response.Error != "237" {
 		t.Fatalf("expected error 237, got %q", response.Error)
+	}
+}
+
+func TestExecuteUnauthenticated(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		chunk := `[["wrb.fr","wXbhsf",null,null,null,[16],"generic"]]`
+		fmt.Fprintf(w, ")]}'\n%d\n%s\n", len(chunk), chunk)
+	}))
+	defer server.Close()
+
+	config := Config{
+		Host:      strings.TrimPrefix(server.URL, "http://"),
+		App:       "notebooklm",
+		AuthToken: "test_token",
+		Headers:   map[string]string{"Content-Type": "application/x-www-form-urlencoded"},
+		UseHTTP:   true,
+	}
+	client := NewClient(config, WithHTTPClient(server.Client()))
+
+	rpc := RPC{ID: "wXbhsf", Args: []interface{}{}, Index: "generic"}
+
+	_, err := client.Execute([]RPC{rpc})
+	if err == nil {
+		t.Fatal("Expected ErrUnauthorized, got nil")
+	}
+	if !errors.Is(err, ErrUnauthorized) {
+		t.Fatalf("Expected ErrUnauthorized, got: %v", err)
+	}
+}
+
+// The UNAUTHENTICATED reply Office got on 2026-10-18: the chunk lengths do not match the
+// bytes, which used to make nlm ls print an empty list instead of the auth error.
+func TestDecodeChunkedUnauthenticatedWithWrongLengths(t *testing.T) {
+	raw := ")]}'\n\n105\n" +
+		`[["wrb.fr","wXbhsf",null,null,null,[16],"generic"],["di",20],["af.httprm",19,"-7604889669387110353",4]]` +
+		"\n25\n" + `[["e",4,null,null,141]]` + "\n"
+	responses, err := decodeChunkedResponse(raw)
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	found := false
+	for _, r := range responses {
+		if r.ID == "wXbhsf" && r.Error == "unauthorized" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("want an unauthorized wXbhsf response, got %+v", responses)
+	}
+}
+
+// A large reply whose chunk lengths count characters, not bytes (emoji in notebook
+// titles): the line fallback must return the data and ignore the closing "e" chunk.
+func TestDecodeChunkedMultibyteLengthsIgnoresEndMarker(t *testing.T) {
+	body := `[["wrb.fr","wXbhsf","[[[\"📐 Tensors\",[],\"3672824c\"]]]",null,null,null,"generic"]]`
+	raw := ")]}'\n\n" + "70" + "\n" + body + "\n25\n" + `[["e",4,null,null,152427]]` + "\n"
+	responses, err := decodeChunkedResponse(raw)
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(responses) != 1 || responses[0].ID != "wXbhsf" || responses[0].Error != "" {
+		t.Fatalf("want one wXbhsf data response, got %+v", responses)
 	}
 }

@@ -62,6 +62,11 @@ Audio Commands:
   audio-rm <id>     Delete audio overview
   audio-share <id>  Share audio overview
 
+Video Commands:
+  video-create <id> <instructions>  Create video overview
+  video-get <id>    Get video overview
+  video-rm <id>     Delete video overview
+
 Generation Commands:
   generate-guide <id>  Generate notebook guide
   generate-outline <id>  Generate content outline
@@ -133,7 +138,65 @@ First, authenticate with your Google account:
 nlm auth
 ```
 
-This will launch Chrome to authenticate with your Google account. The authentication tokens will be saved in `.env` file.
+This will launch Chrome to authenticate with your Google account. The authentication tokens will be saved in `~/.nlm/env` file.
+
+If you encounter issues during authentication, try using debug mode for additional troubleshooting information:
+
+```bash
+nlm -debug auth
+```
+
+### Manual Authentication (Recommended)
+
+If automatic browser authentication fails or captures incomplete cookies, use the manual cURL method:
+
+1. Open https://notebooklm.google.com in Chrome (make sure you're logged in)
+2. Open DevTools (F12) → Network tab
+3. Refresh the page
+4. Find any `batchexecute` request
+5. Right-click → **Copy as cURL**
+6. Run:
+   ```bash
+   echo '<paste curl command here>' | ./nlm auth
+   ```
+
+This extracts the proper authenticated cookies and auth token from your browser session.
+
+### Refreshing Authentication
+
+The `at=` token in the authentication expires after a few hours. When `nlm list` stops working, use the helper script to refresh:
+
+**Interactive mode (paste + Ctrl-D):**
+```bash
+./scripts/nlm-refresh-auth
+# Paste cURL from DevTools, then press Ctrl-D
+```
+
+**Pipe directly:**
+```bash
+echo '<curl command>' | ./scripts/nlm-refresh-auth
+```
+
+**Add to PATH for convenience:**
+```bash
+ln -sf /path/to/nlm/scripts/nlm-refresh-auth ~/bin/nlm-refresh-auth
+# Then run from anywhere:
+nlm-refresh-auth
+```
+
+The script extracts auth credentials, writes `~/.nlm/env`, and verifies with a test `nlm list`.
+
+### Sharing Authentication Across Machines
+
+The `~/.nlm/env` file can be copied to other machines:
+
+```bash
+scp ~/.nlm/env user@other-machine:~/.nlm/env
+```
+
+**Note**: This file contains live Google session cookies — treat it like a password. When auth expires, refresh on any machine and copy the updated file.
+
+**Note**: Authentication has been tested and confirmed working on Ubuntu Linux. The tool will automatically launch Chrome in the background to handle the Google OAuth flow.
 
 ## Usage 💻
 
@@ -207,6 +270,21 @@ nlm audio-share <notebook-id>
 nlm audio-share <notebook-id> --public
 ```
 
+### Video Overview
+
+```bash
+# Create a video overview
+nlm video-create <notebook-id> "create engaging visual explanation"
+
+# Get video overview status/content
+nlm video-get <notebook-id>
+
+# Delete video overview
+nlm video-rm <notebook-id>
+```
+
+**Note**: Video overview functionality requires discovery of the actual NotebookLM RPC endpoints. Currently, the video commands are implemented but will show an informative error message until the correct RPC endpoint IDs are discovered through network inspection of the NotebookLM web interface.
+
 ## Examples 📋
 
 Create a notebook and add some content:
@@ -221,9 +299,52 @@ nlm add $notebook_id research-data.pdf
 # Create an audio overview
 nlm audio-create $notebook_id "summarize in a professional tone"
 
+# Create a video overview
+nlm video-create $notebook_id "create visual presentation with key insights"
+
 # Check the audio overview
 nlm audio-get $notebook_id
+
+# Check the video overview
+nlm video-get $notebook_id
 ```
+
+### Automated Workflow Script 🤖
+
+For automated PDF processing, use the included workflow script:
+
+```bash
+# Run the automated workflow
+./scripts/nlm_workflow.sh document.pdf
+```
+
+**What it does:**
+- Creates a notebook named after the PDF file (if it doesn't exist)
+- Uploads the PDF as a source to the notebook
+- Generates an audio overview automatically
+- Downloads the audio file to the current directory as `document.wav`
+
+**Features:**
+- ✅ Smart duplicate detection - skips processing if notebook already exists
+- ✅ Robust upload with retry logic and verification
+- ✅ Automatic polling for audio readiness
+- ✅ Clean output with timestamped logging
+
+**Example usage:**
+```bash
+# Process a research paper
+./scripts/nlm_workflow.sh research-paper-2024.pdf
+
+# The script will:
+# 1. Create notebook "research-paper-2024"
+# 2. Upload the PDF
+# 3. Generate audio overview
+# 4. Save as "research-paper-2024.wav"
+```
+
+**Requirements:**
+- nlm CLI must be installed and authenticated (`nlm auth`)
+- Standard Unix tools: `grep`, `sed`, `head`, `mktemp`
 
 ## Advanced Usage 🔧
 
@@ -249,7 +370,22 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 
 ## 🚀 Enhancements in This Fork
 
+### v0.2.0 (January 2026)
+- ✅ **Fixed authentication error detection** - Now properly detects Google API error code 16 (UNAUTHENTICATED) and triggers re-auth
+- ✅ **Updated API parameters** - Synced `bl` (build label) and `f.sid` parameters with current NotebookLM API
+- ✅ **Improved auth token parsing** - Fixed URL-encoded token handling from cURL commands
+- ✅ **Added cookie validation** - Warns when captured cookies are incomplete (missing SID, SSID, etc.)
+- ✅ **Manual cURL auth method** - Added reliable fallback authentication via browser DevTools
+
+### v0.1.0 (Previous)
 - ✅ Fixed multi-chunk response decoding in `nlm list`
+- ✅ Fixed infinite recursion bug in batchexecute response parsing
+- ✅ Improved authentication timeout handling and reliability
+- ✅ Added custom parser for NotebookLM API response format changes
+- ✅ Confirmed working authentication on Ubuntu Linux with debug mode support
+- ✅ Added Video Overview functionality framework (`video-create`, `video-get`, `video-rm`)
+  - Framework ready for easy endpoint discovery and integration
+  - Informative error messages explaining current limitations
 
 ## License 📄
 

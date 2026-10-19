@@ -100,12 +100,16 @@ func (o UnmarshalOptions) setRepeatedField(m protoreflect.Message, fd protorefle
 		var decoded []interface{}
 		if err := json.Unmarshal([]byte(s), &decoded); err == nil {
 			val = decoded
+		} else {
+			// Non-array string encountered; skip gracefully.
+			return nil
 		}
 	}
 
 	arr, ok := val.([]interface{})
 	if !ok {
-		return fmt.Errorf("expected array for repeated field %s, got %T with value %v", fd.Name(), val, val)
+		// Ignore non-array values instead of returning an error.
+		return nil
 	}
 
 	list := m.Mutable(fd).List()

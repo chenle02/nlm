@@ -39,8 +39,8 @@ if [[ -z "${CHROME_BIN}" ]]; then
 fi
 
 # Open NotebookLM in your normal Chrome window
-echo "[nlm-auth] Launching Chrome → https://notebooklm.google.com"
-"${CHROME_BIN}" --profile-directory="${PROFILE}" "https://notebooklm.google.com" >/dev/null 2>&1 &
+echo "[nlm-auth] Launching Chrome → https://notebook.google.com"
+"${CHROME_BIN}" --profile-directory="${PROFILE}" "https://notebook.google.com" >/dev/null 2>&1 &
 sleep 2
 
 cat << 'INSTR'
